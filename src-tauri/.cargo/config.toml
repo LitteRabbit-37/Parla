@@ -9,3 +9,6 @@
 
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "link-args=/FORCE:MULTIPLE /IGNORE:4006 /IGNORE:4088"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "link-args=/FORCE:MULTIPLE /IGNORE:4006 /IGNORE:4088"]

@@ -10,11 +10,30 @@ permissions:
   contents: write
 
 jobs:
-  # CPU variant - canonical build. Produces the signed installers + the
-  # updater artifacts (latest.json + .sig files). The Tauri updater in the
+  # CPU variants (x64 + ARM64). Produces signed installers + updater
+  # artifacts (latest.json + .sig files). The Tauri updater in the
   # installed app points to this job's latest.json.
+  #
+  # gpu-detect is disabled on ARM64 (--no-default-features) because
+  # NVIDIA does not ship nvml.dll for Windows ARM64. All other features
+  # (whisper.cpp, llama.cpp, ONNX Runtime, WASAPI audio, etc.) compile
+  # natively for both architectures.
   cpu:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+            cargo-args: ""
+          - arch: arm64
+            runner: windows-11-arm
+            rust-target: aarch64-pc-windows-msvc
+            cargo-args: "-- --no-default-features"
+
+    name: cpu (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -26,12 +45,14 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
-          key: cpu
+          key: cpu-${{ matrix.arch }}
 
       - name: Install npm dependencies
         run: npm ci
@@ -43,7 +64,24 @@ jobs:
           $conf.bundle.createUpdaterArtifacts = $true
           $conf | ConvertTo-Json -Depth 20 | Set-Content src-tauri/tauri.conf.json -Encoding UTF8
 
-      - name: Build + sign + bundle (CPU)
+      - name: Setup MSVC ARM64 developer environment
+        if: matrix.arch == 'arm64'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: arm64
+
+      - name: Use Clang for ARM64 native C/C++ (ggml requirement)
+        if: matrix.arch == 'arm64'
+        shell: pwsh
+        run: |
+          echo "CC=clang-cl" >> $env:GITHUB_ENV
+          echo "CXX=clang-cl" >> $env:GITHUB_ENV
+          echo "CMAKE_GENERATOR=Ninja" >> $env:GITHUB_ENV
+          echo "CFLAGS=--target=aarch64-pc-windows-msvc" >> $env:GITHUB_ENV
+          echo "CXXFLAGS=--target=aarch64-pc-windows-msvc /EHsc" >> $env:GITHUB_ENV
+
+      - name: Build + sign + bundle (CPU ${{ matrix.arch }})
+        id: tauri_build
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -55,12 +93,23 @@ jobs:
           releaseBody: |
             See the [changelog](https://github.com/LitteRabbit-37/Parla/blob/main/CHANGELOG.md) for details.
 
-            This release ships only the CPU variant. `Parla_x.y.z_x64-setup.exe` runs Whisper, Parakeet and llama.cpp on CPU and works on every Windows 10 / 11 machine. Auto-updater is wired via `latest.json` so future releases install themselves.
+            This release ships CPU variants for both x64 and ARM64:
+            - `Parla_x.y.z_x64-setup.exe` — for standard x86-64 Windows PCs
+            - `Parla_x.y.z_arm64-setup.exe` — for Windows on ARM devices (Snapdragon, etc.)
+
+            Both variants run Whisper, Parakeet and llama.cpp on CPU and work on every Windows 10 / 11 machine of their respective architecture. Auto-updater is wired via `latest.json` so future releases install themselves.
 
             Users with an NVIDIA GPU who want CUDA acceleration can build Parla themselves from source - see [BUILDING.md](https://github.com/LitteRabbit-37/Parla/blob/main/BUILDING.md#cuda-build) for the recipe.
           releaseDraft: true
           prerelease: false
-          args: --target x86_64-pc-windows-msvc
+          args: --target ${{ matrix.rust-target }} ${{ matrix.cargo-args }}
+
+      - name: Upload ${{ matrix.arch }} artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: parla-${{ matrix.arch }}-installer
+          path: src-tauri/target/${{ matrix.rust-target }}/release/bundle/nsis/
+          if-no-files-found: error
 
   # NOTE : GitHub's public windows-latest runner (4 cores, 16 GB, 14 GB
   # disk) is too small to compile whisper.cpp CUDA + llama.cpp CUDA +
