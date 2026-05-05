@@ -88,9 +88,13 @@ use commands::vad::{
     vad_delete, vad_download, vad_get_state, vad_is_enabled, vad_is_ready, vad_set_enabled,
     VadEngineState,
 };
+use commands::hotkey::{
+    get_hotkey_config, list_hotkey_options, reset_hotkey_config, set_hotkey_config,
+    HotkeyManagerState,
+};
 use hotkeys::{
-    keyboard_hook::{install_hook, HotkeyOption},
-    manager::{dispatch_loop, HotkeyManager, HotkeyMode},
+    keyboard_hook::install_hook,
+    manager::{dispatch_loop, HotkeyManager},
 };
 
 /// Info GPU exposee au frontend.
@@ -111,11 +115,6 @@ fn get_gpu_info() -> GpuInfo {
 fn ping() -> &'static str {
     "pong"
 }
-
-/// Hotkey par defaut : Right Alt (equivalent Windows du Right Command
-/// utilise par VoiceInk cote macOS, cf HotkeyManager.swift:152).
-const DEFAULT_HOTKEY_PRIMARY: HotkeyOption = HotkeyOption::RightAlt;
-const DEFAULT_HOTKEY_SECONDARY: HotkeyOption = HotkeyOption::None;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -347,20 +346,34 @@ pub fn run() {
             set_recorder_style,
             get_onboarding_completed,
             set_onboarding_completed,
+            get_hotkey_config,
+            set_hotkey_config,
+            reset_hotkey_config,
+            list_hotkey_options,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
 fn setup_hotkeys(app: AppHandle) {
-    let manager = Arc::new(HotkeyManager::new(HotkeyMode::Hybrid));
-    let rx = install_hook(DEFAULT_HOTKEY_PRIMARY, DEFAULT_HOTKEY_SECONDARY);
+    let cfg = commands::hotkey::load(&app);
+    let manager = Arc::new(HotkeyManager::with_modes(
+        cfg.primary.mode,
+        cfg.secondary.mode,
+    ));
+    let rx = install_hook(cfg.primary.trigger, cfg.secondary.trigger);
 
     info!(
-        primary = ?DEFAULT_HOTKEY_PRIMARY,
-        secondary = ?DEFAULT_HOTKEY_SECONDARY,
+        primary = ?cfg.primary.trigger,
+        primary_mode = ?cfg.primary.mode,
+        secondary = ?cfg.secondary.trigger,
+        secondary_mode = ?cfg.secondary.mode,
         "Hook clavier bas niveau installe"
     );
+
+    // Partage le manager avec les commandes Tauri pour pouvoir update les
+    // modes a chaud quand l'utilisateur change la config dans Settings.
+    app.manage(HotkeyManagerState(manager.clone()));
 
     let app_for_dispatch = app.clone();
     let manager_for_dispatch = manager.clone();
@@ -376,5 +389,4 @@ fn setup_hotkeys(app: AppHandle) {
             });
         })
         .expect("thread dispatch hotkey");
-
 }

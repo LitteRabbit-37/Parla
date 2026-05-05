@@ -586,7 +586,28 @@
     "autostartDeactivate": "Desactivar",
     "hotkeyTitle": "Hook global de teclado",
     "hotkeyDescription": "Captura del atajo Push-to-Talk en cualquier parte de Windows.",
-    "hotkeyTip": "Parla instala un hook WH_KEYBOARD_LL de bajo nivel que no requiere permisos especiales en Windows. El atajo por defecto es Alt derecho."
+    "hotkeyTip": "Parla instala un hook WH_KEYBOARD_LL de bajo nivel que no requiere permisos especiales en Windows. El atajo por defecto es Alt derecho.",
+    "audio": {
+      "detected_one": "{{count}} entrada de audio detectada",
+      "detected_other": "{{count}} entradas de audio detectadas",
+      "none": "Ningun microfono detectado",
+      "hint": "Conecta un microfono o revisa Configuracion > Privacidad > Microfono."
+    },
+    "ocr": {
+      "available": "Windows.Media.Ocr disponible",
+      "unavailable": "OCR no disponible",
+      "hint": "Anade un paquete de idioma OCR en Configuracion de Windows > Hora e idioma > Idioma."
+    },
+    "autostart": {
+      "enabled": "Inicio automatico activado",
+      "disabled": "Inicio automatico desactivado",
+      "unknown": "Estado de inicio automatico desconocido",
+      "disabledHint": "Parla no se iniciara automaticamente con Windows."
+    },
+    "hotkey": {
+      "active": "Hook de teclado activo",
+      "hint": "Atajo por defecto: Right Alt. Configura otro en Ajustes."
+    }
   },
   "miniRecorder": {
     "promptActive": "Prompt activo",
@@ -608,7 +629,57 @@
     "timeout": "Tiempo de espera agotado. Compruebe su conexion de red.",
     "networkError": "Error de red. Compruebe su conexion.",
     "apiKeyMissing": "Clave API ausente para {{provider}}.",
-    "modelNotDownloaded": "Este modelo no esta descargado todavia.",
-    "generic": "Ha ocurrido un error: {{message}}"
+    "modelNotDownloaded": "El modelo {{model}} aun no esta descargado.",
+    "generic": "Ha ocurrido un error: {{message}}",
+    "noWhisper": "Ningun modelo Whisper seleccionado. Abre Modelos IA y elige uno.",
+    "noParakeet": "Ningun modelo Parakeet seleccionado. Abre Modelos IA y elige uno.",
+    "parakeetIncomplete": "El modelo Parakeet {{model}} esta incompleto. Vuelve a descargarlo desde Modelos IA.",
+    "cloudUnconfigured": "Ningun proveedor de nube o modelo seleccionado. Abre Modelos IA y configura uno."
+  },
+  "prompts": {
+    "default": {
+      "title": "Default",
+      "description": "Limpia la transcripcion (gramatica, muletillas, formato)."
+    },
+    "assistant": {
+      "title": "Assistant",
+      "description": "Modo asistente: respuesta directa, sin markdown."
+    }
+  },
+  "hotkey": {
+    "cardTitle": "Atajo de grabacion",
+    "cardDescription": "Elige la tecla (o combinacion) que activa el dictado. Por defecto es Right Alt.",
+    "primary": "Principal",
+    "secondary": "Secundario",
+    "addSecondary": "Anadir segundo atajo",
+    "removeSecondary": "Quitar segundo atajo",
+    "resetDefaults": "Restablecer valores predeterminados",
+    "altGrTip": "En teclados AZERTY/QWERTZ, AltGr genera un Right Alt sintetico cuando escribes @, #, {, [, etc. Parla los detecta e ignora automaticamente.",
+    "options": {
+      "none": "Ninguno (desactivado)",
+      "rightAlt": "Alt derecho",
+      "leftAlt": "Alt izquierdo",
+      "rightCtrl": "Ctrl derecho",
+      "leftCtrl": "Ctrl izquierdo",
+      "rightWin": "Windows derecho",
+      "rightShift": "Shift derecho",
+      "leftShift": "Shift izquierdo",
+      "custom": "Combinacion personalizada..."
+    },
+    "modes": {
+      "toggle": "Toggle",
+      "pushToTalk": "Push to talk",
+      "hybrid": "Hibrido"
+    },
+    "modeHints": {
+      "toggle": "Pulsa para iniciar, pulsa de nuevo para parar. Dictado manos libres.",
+      "pushToTalk": "Manten pulsado para grabar, suelta para parar.",
+      "hybrid": "Toque (menos de 500ms) inicia una sesion manos libres. Mantenido (mas de 500ms) = push-to-talk."
+    },
+    "record": {
+      "title": "Grabar una combinacion personalizada",
+      "hint": "Pulsa las teclas que quieras usar. Necesitas al menos un modificador y una tecla final (ej. Ctrl + Alt + R, F13, Win + Espacio). Esc cancela.",
+      "waiting": "Pulsa tu combinacion..."
+    }
   }
 }

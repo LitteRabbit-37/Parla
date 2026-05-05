@@ -17,6 +17,7 @@ import {
   SheetClose,
 } from "@/components/ui/sheet";
 import { api, type CustomPrompt } from "@/lib/tauri";
+import { promptDescription, promptTitle } from "@/lib/promptLabels";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -147,18 +148,21 @@ export function PromptEditor({ prompts, activeId, onChange }: Props) {
           >
             <div className="min-w-0">
               <p className="truncate text-sm font-medium">
-                {p.title}
+                {promptTitle(t, p)}
                 {p.is_predefined && (
                   <span className="ml-2 text-[10px] text-muted-foreground">
                     {t("promptEditor.predefined")}
                   </span>
                 )}
               </p>
-              {p.description && (
-                <p className="truncate text-xs text-muted-foreground">
-                  {p.description}
-                </p>
-              )}
+              {(() => {
+                const desc = promptDescription(t, p);
+                return desc ? (
+                  <p className="truncate text-xs text-muted-foreground">
+                    {desc}
+                  </p>
+                ) : null;
+              })()}
             </div>
             <div className="flex shrink-0 gap-1">
               <Button

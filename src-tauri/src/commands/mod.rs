@@ -2,6 +2,7 @@ pub mod cloud;
 pub mod dictionary;
 pub mod enhancement;
 pub mod history;
+pub mod hotkey;
 pub mod llm_models;
 pub mod models;
 pub mod parakeet;

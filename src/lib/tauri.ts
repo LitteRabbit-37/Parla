@@ -206,8 +206,14 @@ export type DetectionPreview = {
 
 export type PermissionState = {
   ok: boolean;
-  label: string;
-  hint: string | null;
+  /** i18n key resolved on the frontend (e.g. "permissions.audio.detected"). */
+  label_key: string;
+  /** Optional interpolation arguments for the label key (e.g. { count: 3 }). */
+  label_args?: Record<string, unknown> | null;
+  /** Optional i18n key for an extended hint shown when ok = false. */
+  hint_key?: string | null;
+  /** Raw technical diagnostic (Win32 error message, etc.). Not translated. */
+  diagnostic?: string | null;
 };
 
 export type PermissionStatus = {
@@ -514,4 +520,55 @@ export const api = {
   getOnboardingCompleted: () => invoke<boolean>("get_onboarding_completed"),
   setOnboardingCompleted: (completed: boolean) =>
     invoke<void>("set_onboarding_completed", { completed }),
+
+  getHotkeyConfig: () => invoke<HotkeyConfig>("get_hotkey_config"),
+  setHotkeyConfig: (config: HotkeyConfig) =>
+    invoke<void>("set_hotkey_config", { config }),
+  resetHotkeyConfig: () => invoke<HotkeyConfig>("reset_hotkey_config"),
+  listHotkeyOptions: () => invoke<HotkeyOptionInfo[]>("list_hotkey_options"),
+};
+
+// -- Hotkey types ----------------------------------------------------------
+//
+// Mappent les structs Rust dans src-tauri/src/commands/hotkey.rs et
+// src-tauri/src/hotkeys/keyboard_hook.rs. Le tag `kind` differencie les
+// trois variantes possibles.
+
+export type HotkeyOptionId =
+  | "none"
+  | "rightAlt"
+  | "leftAlt"
+  | "leftCtrl"
+  | "rightCtrl"
+  | "rightWin"
+  | "rightShift"
+  | "leftShift";
+
+export type HotkeyTrigger =
+  | { kind: "none" }
+  | { kind: "modifier"; option: HotkeyOptionId }
+  | {
+      kind: "combo";
+      vk: number;
+      ctrl: boolean;
+      alt: boolean;
+      shift: boolean;
+      win: boolean;
+    };
+
+export type HotkeyMode = "toggle" | "pushToTalk" | "hybrid";
+
+export type HotkeySlotConfig = {
+  trigger: HotkeyTrigger;
+  mode: HotkeyMode;
+};
+
+export type HotkeyConfig = {
+  primary: HotkeySlotConfig;
+  secondary: HotkeySlotConfig;
+};
+
+export type HotkeyOptionInfo = {
+  id: HotkeyOptionId;
+  vk: number | null;
 };

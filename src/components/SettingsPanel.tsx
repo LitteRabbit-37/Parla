@@ -15,6 +15,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { HotkeyCard } from "@/components/HotkeyCard";
 import { InfoTip } from "@/components/ui/info-tip";
 import {
   LANGUAGE_LABELS,
@@ -167,6 +168,8 @@ export function SettingsPanel() {
           </label>
         </CardContent>
       </Card>
+
+      <HotkeyCard />
 
       <Card>
         <CardHeader>

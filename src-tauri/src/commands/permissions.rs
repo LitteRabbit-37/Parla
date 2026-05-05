@@ -10,6 +10,7 @@
 // - Auto-start : tauri-plugin-autostart.
 
 use serde::Serialize;
+use serde_json::{json, Value as JsonValue};
 use tauri::{command, AppHandle};
 
 #[derive(Debug, Serialize)]
@@ -20,11 +21,23 @@ pub struct PermissionStatus {
     pub hotkey: PermissionState,
 }
 
+/// Status d'une permission. Le backend ne retourne JAMAIS de string visible
+/// par l'utilisateur : il fournit une cle i18n (`label_key`) plus eventuellement
+/// des arguments (`label_args` pour interpoler `{count}`, etc.) et le frontend
+/// resoud via `react-i18next` selon la langue active.
 #[derive(Debug, Serialize)]
 pub struct PermissionState {
     pub ok: bool,
-    pub label: String,
-    pub hint: Option<String>,
+    pub label_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label_args: Option<JsonValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint_key: Option<String>,
+    /// Diagnostic technique brut (message d'erreur natif Windows, etc.).
+    /// Affiche seulement en complement du hint traduit. Reste en anglais
+    /// comme tous les messages d'erreur Win32, donc non traduit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<String>,
 }
 
 #[command]
@@ -35,17 +48,18 @@ pub fn check_permissions(app: AppHandle) -> PermissionStatus {
     let microphone = if !devs.is_empty() {
         PermissionState {
             ok: true,
-            label: format!("{} entree(s) audio detectee(s)", devs.len()),
-            hint: None,
+            label_key: "permissions.audio.detected".into(),
+            label_args: Some(json!({ "count": devs.len() })),
+            hint_key: None,
+            diagnostic: None,
         }
     } else {
         PermissionState {
             ok: false,
-            label: "Aucun microphone detecte".into(),
-            hint: Some(
-                "Branche un micro ou verifie Settings > Confidentialite > Microphone."
-                    .into(),
-            ),
+            label_key: "permissions.audio.none".into(),
+            label_args: None,
+            hint_key: Some("permissions.audio.hint".into()),
+            diagnostic: None,
         }
     };
 
@@ -53,15 +67,17 @@ pub fn check_permissions(app: AppHandle) -> PermissionStatus {
     let ocr = match windows::Media::Ocr::OcrEngine::TryCreateFromUserProfileLanguages() {
         Ok(_) => PermissionState {
             ok: true,
-            label: "Windows.Media.Ocr disponible".into(),
-            hint: None,
+            label_key: "permissions.ocr.available".into(),
+            label_args: None,
+            hint_key: None,
+            diagnostic: None,
         },
         Err(e) => PermissionState {
             ok: false,
-            label: "OCR non disponible".into(),
-            hint: Some(format!(
-                "Ajoute un pack de langue OCR dans Settings > Heure et langue > Langue ({e})"
-            )),
+            label_key: "permissions.ocr.unavailable".into(),
+            label_args: None,
+            hint_key: Some("permissions.ocr.hint".into()),
+            diagnostic: Some(e.to_string()),
         },
     };
 
@@ -69,18 +85,24 @@ pub fn check_permissions(app: AppHandle) -> PermissionStatus {
     let autostart = match autostart_enabled(&app) {
         Ok(true) => PermissionState {
             ok: true,
-            label: "Auto-demarrage actif".into(),
-            hint: None,
+            label_key: "permissions.autostart.enabled".into(),
+            label_args: None,
+            hint_key: None,
+            diagnostic: None,
         },
         Ok(false) => PermissionState {
             ok: false,
-            label: "Auto-demarrage desactive".into(),
-            hint: Some("Parla ne se lancera pas au demarrage de Windows.".into()),
+            label_key: "permissions.autostart.disabled".into(),
+            label_args: None,
+            hint_key: Some("permissions.autostart.disabledHint".into()),
+            diagnostic: None,
         },
         Err(e) => PermissionState {
             ok: false,
-            label: "Statut auto-demarrage inconnu".into(),
-            hint: Some(e),
+            label_key: "permissions.autostart.unknown".into(),
+            label_args: None,
+            hint_key: None,
+            diagnostic: Some(e),
         },
     };
 
@@ -88,10 +110,10 @@ pub fn check_permissions(app: AppHandle) -> PermissionStatus {
     // speciale. On indique toujours OK.
     let hotkey = PermissionState {
         ok: true,
-        label: "Hook clavier actif".into(),
-        hint: Some(
-            "Par defaut Right Alt. Configure le raccourci dans Settings.".into(),
-        ),
+        label_key: "permissions.hotkey.active".into(),
+        label_args: None,
+        hint_key: Some("permissions.hotkey.hint".into()),
+        diagnostic: None,
     };
 
     PermissionStatus {

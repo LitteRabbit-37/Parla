@@ -256,7 +256,7 @@ pub async fn start_streaming_session(
         .clone();
 
     let key = api_keys::get_api_key(&provider)?
-        .ok_or_else(|| anyhow!("aucune cle API pour {provider}"))?;
+        .ok_or_else(|| anyhow!("PARLA_ERR:apiKey:{provider}"))?;
 
     // Injection du dictionnaire enabled comme en batch.
     let mut custom_vocab = Vec::new();
@@ -432,7 +432,7 @@ async fn transcribe_cloud(
         .ok_or_else(|| anyhow!("provider cloud inconnu: {provider_id}"))?;
     let key = api_keys::get_api_key(provider_id)
         .map_err(|e| anyhow!("keyring: {e}"))?
-        .ok_or_else(|| anyhow!("aucune cle API pour {provider_id}"))?;
+        .ok_or_else(|| anyhow!("PARLA_ERR:apiKey:{provider_id}"))?;
 
     let mut req = TranscribeRequest::new(model);
     req.language = language;
@@ -482,7 +482,7 @@ async fn run_pipeline(app: AppHandle, wav_path: PathBuf) -> Result<()> {
     // Branche cloud : pas de VAD, pas de WhisperEngine. Upload direct au provider.
     if let Source::Cloud { provider, model } = &source {
         if provider.is_empty() || model.is_empty() {
-            anyhow::bail!("provider cloud ou modele non configure");
+            anyhow::bail!("PARLA_ERR:cloudUnconfigured");
         }
         let (text, duration_ms) = transcribe_cloud(
             &app,
@@ -506,7 +506,7 @@ async fn run_pipeline(app: AppHandle, wav_path: PathBuf) -> Result<()> {
     // Branche Parakeet (local via parakeet-rs).
     if let Source::Parakeet { model_id } = &source {
         if model_id.is_empty() {
-            anyhow::bail!("aucun modele Parakeet selectionne");
+            anyhow::bail!("PARLA_ERR:noParakeet");
         }
         let mgr = app
             .state::<crate::commands::parakeet::ParakeetModelManagerState>()
@@ -514,7 +514,7 @@ async fn run_pipeline(app: AppHandle, wav_path: PathBuf) -> Result<()> {
             .clone();
         let model_dir = mgr
             .path_for_id(model_id)
-            .ok_or_else(|| anyhow!("modele Parakeet incomplet: {model_id}"))?;
+            .ok_or_else(|| anyhow!("PARLA_ERR:parakeetIncomplete:{model_id}"))?;
         let engine_state = app
             .state::<crate::transcription::parakeet::ParakeetEngineState>()
             .0
@@ -551,7 +551,7 @@ async fn run_pipeline(app: AppHandle, wav_path: PathBuf) -> Result<()> {
         unreachable!();
     };
     if model_id.is_empty() {
-        anyhow::bail!("aucun modele Whisper selectionne");
+        anyhow::bail!("PARLA_ERR:noWhisper");
     }
 
     let engine = app
@@ -565,7 +565,7 @@ async fn run_pipeline(app: AppHandle, wav_path: PathBuf) -> Result<()> {
 
     let model_path = models
         .path_if_present(&model_id)
-        .ok_or_else(|| anyhow!("modele non telecharge: {model_id}"))?;
+        .ok_or_else(|| anyhow!("PARLA_ERR:modelNotDownloaded:{model_id}"))?;
 
     // VAD optionnelle (matching VoiceInk IsVADEnabled). Si actif et le modele
     // Silero est present, on segmente d'abord puis on transcrit uniquement les

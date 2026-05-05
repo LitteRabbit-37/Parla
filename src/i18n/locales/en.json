@@ -586,7 +586,28 @@
     "autostartDeactivate": "Deactivate",
     "hotkeyTitle": "Global keyboard hook",
     "hotkeyDescription": "Capture the Push-to-Talk shortcut anywhere in Windows.",
-    "hotkeyTip": "Parla installs a low-level WH_KEYBOARD_LL hook which does not require special permissions on Windows. The default shortcut is Right Alt."
+    "hotkeyTip": "Parla installs a low-level WH_KEYBOARD_LL hook which does not require special permissions on Windows. The default shortcut is Right Alt.",
+    "audio": {
+      "detected_one": "{{count}} audio input detected",
+      "detected_other": "{{count}} audio inputs detected",
+      "none": "No microphone detected",
+      "hint": "Plug a microphone in or check Settings > Privacy > Microphone."
+    },
+    "ocr": {
+      "available": "Windows.Media.Ocr available",
+      "unavailable": "OCR unavailable",
+      "hint": "Add an OCR language pack in Windows Settings > Time and language > Language."
+    },
+    "autostart": {
+      "enabled": "Auto-start enabled",
+      "disabled": "Auto-start disabled",
+      "unknown": "Auto-start status unknown",
+      "disabledHint": "Parla will not launch automatically with Windows."
+    },
+    "hotkey": {
+      "active": "Keyboard hook active",
+      "hint": "Default trigger is Right Alt. Configure a different one in Settings."
+    }
   },
   "miniRecorder": {
     "promptActive": "Active prompt",
@@ -608,7 +629,57 @@
     "timeout": "Request timed out. Check your network connection.",
     "networkError": "Network error. Check your connection.",
     "apiKeyMissing": "API key missing for {{provider}}.",
-    "modelNotDownloaded": "Model is not downloaded yet.",
-    "generic": "An error occurred: {{message}}"
+    "modelNotDownloaded": "Model {{model}} is not downloaded yet.",
+    "generic": "An error occurred: {{message}}",
+    "noWhisper": "No Whisper model selected. Open AI Models and pick one.",
+    "noParakeet": "No Parakeet model selected. Open AI Models and pick one.",
+    "parakeetIncomplete": "Parakeet model {{model}} is incomplete. Re-download it from AI Models.",
+    "cloudUnconfigured": "No cloud provider or model selected. Open AI Models and configure one."
+  },
+  "prompts": {
+    "default": {
+      "title": "Default",
+      "description": "Cleans up the transcription (grammar, fillers, formatting)."
+    },
+    "assistant": {
+      "title": "Assistant",
+      "description": "Assistant mode: direct answer, no markdown."
+    }
+  },
+  "hotkey": {
+    "cardTitle": "Recording shortcut",
+    "cardDescription": "Pick the key (or combination) that activates dictation. Default is Right Alt.",
+    "primary": "Primary",
+    "secondary": "Secondary",
+    "addSecondary": "Add second shortcut",
+    "removeSecondary": "Remove second shortcut",
+    "resetDefaults": "Reset to defaults",
+    "altGrTip": "On AZERTY/QWERTZ keyboards, AltGr generates a synthetic Right Alt event when you type @, #, {, [, etc. Parla detects and ignores those automatically.",
+    "options": {
+      "none": "None (disabled)",
+      "rightAlt": "Right Alt",
+      "leftAlt": "Left Alt",
+      "rightCtrl": "Right Ctrl",
+      "leftCtrl": "Left Ctrl",
+      "rightWin": "Right Win",
+      "rightShift": "Right Shift",
+      "leftShift": "Left Shift",
+      "custom": "Custom combination..."
+    },
+    "modes": {
+      "toggle": "Toggle",
+      "pushToTalk": "Push to talk",
+      "hybrid": "Hybrid"
+    },
+    "modeHints": {
+      "toggle": "Press to start, press again to stop. Hands-free dictation.",
+      "pushToTalk": "Hold to record, release to stop.",
+      "hybrid": "Tap (under 500ms) starts a hands-free session. Hold (over 500ms) is push-to-talk."
+    },
+    "record": {
+      "title": "Record a custom combination",
+      "hint": "Press the keys you want to use. Need at least one modifier and a final key (e.g. Ctrl + Alt + R, F13, Win + Space). Esc cancels.",
+      "waiting": "Press your combination..."
+    }
   }
 }

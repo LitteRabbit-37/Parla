@@ -21,11 +21,24 @@ import {
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { useCopyButton } from "@/hooks/useCopyButton";
+import { translateError } from "@/lib/translateError";
 import {
   api,
   type RetentionSettings,
   type TranscriptionRecord,
 } from "@/lib/tauri";
+
+/// Si le texte est une erreur formate "Transcription Failed: PARLA_ERR:...",
+/// extrait le code et le traduit. Sinon retourne le texte tel quel.
+function localizeFailureText(
+  t: ReturnType<typeof useTranslation>["t"],
+  raw: string,
+): string {
+  const prefix = "Transcription Failed: ";
+  if (!raw.startsWith(prefix)) return raw;
+  const code = raw.slice(prefix.length);
+  return `${t("history.failed")}: ${translateError(t, code)}`;
+}
 
 const PAGE_SIZE = 20;
 
@@ -249,7 +262,11 @@ export function HistoryPanel() {
           {items.map((it) => {
             const isSelected = selected.has(it.id);
             const isExpanded = expanded === it.id;
-            const display = it.enhanced_text ?? it.text;
+            const rawDisplay = it.enhanced_text ?? it.text;
+            const display =
+              it.status === "failed"
+                ? localizeFailureText(t, rawDisplay)
+                : rawDisplay;
             return (
               <li
                 key={it.id}

@@ -89,7 +89,11 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             title={t("onboarding.step.microphoneTitle")}
             description={t("onboarding.step.microphoneDescription")}
             ok={perms?.microphone.ok ?? false}
-            statusLabel={perms?.microphone.label}
+            statusLabel={
+              perms?.microphone.label_key
+                ? t(perms.microphone.label_key, perms.microphone.label_args ?? undefined)
+                : undefined
+            }
             primaryAction={{
               label: t("onboarding.step.microphoneAction"),
               onClick: () => api.openPrivacyMicrophone(),
@@ -102,7 +106,11 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             title={t("onboarding.step.ocrTitle")}
             description={t("onboarding.step.ocrDescription")}
             ok={perms?.ocr.ok ?? false}
-            statusLabel={perms?.ocr.label}
+            statusLabel={
+              perms?.ocr.label_key
+                ? t(perms.ocr.label_key, perms.ocr.label_args ?? undefined)
+                : undefined
+            }
             primaryAction={{
               label: t("onboarding.step.ocrAction"),
               onClick: () => api.openLanguageSettings(),
@@ -115,7 +123,11 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             title={t("onboarding.step.autostartTitle")}
             description={t("onboarding.step.autostartDescription")}
             ok={perms?.autostart.ok ?? false}
-            statusLabel={perms?.autostart.label}
+            statusLabel={
+              perms?.autostart.label_key
+                ? t(perms.autostart.label_key, perms.autostart.label_args ?? undefined)
+                : undefined
+            }
             primaryAction={
               perms?.autostart
                 ? {

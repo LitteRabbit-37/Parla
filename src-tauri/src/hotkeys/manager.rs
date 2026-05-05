@@ -14,7 +14,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
-use super::keyboard_hook::{HotkeyEvent, HotkeyOption};
+use super::keyboard_hook::{HotkeyEvent, HotkeySlot};
 
 /// Seuil exact VoiceInk L92 : 0.5 s.
 const HYBRID_PRESS_THRESHOLD: Duration = Duration::from_millis(500);
@@ -24,7 +24,7 @@ const ACTION_COOLDOWN: Duration = Duration::from_millis(500);
 const ESC_DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(1500);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub enum HotkeyMode {
     Toggle,
     PushToTalk,
@@ -58,15 +58,33 @@ struct State {
 
 pub struct HotkeyManager {
     state: Mutex<State>,
-    mode_primary: HotkeyMode,
+    /// Mode applique a chaque slot. Stockes derriere un Mutex pour etre
+    /// modifiable a chaud quand l'utilisateur change la config dans
+    /// Settings sans avoir a recreer le manager.
+    modes: Mutex<HotkeyModes>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct HotkeyModes {
+    primary: HotkeyMode,
+    secondary: HotkeyMode,
 }
 
 impl HotkeyManager {
-    pub fn new(mode_primary: HotkeyMode) -> Self {
+    pub fn with_modes(mode_primary: HotkeyMode, mode_secondary: HotkeyMode) -> Self {
         Self {
             state: Mutex::new(State::default()),
-            mode_primary,
+            modes: Mutex::new(HotkeyModes {
+                primary: mode_primary,
+                secondary: mode_secondary,
+            }),
         }
+    }
+
+    pub fn update_modes(&self, primary: HotkeyMode, secondary: HotkeyMode) {
+        let mut g = self.modes.lock();
+        g.primary = primary;
+        g.secondary = secondary;
     }
 
     /// Notifie le manager que l'enregistrement a reellement demarre ou s'est arrete.
@@ -82,25 +100,21 @@ impl HotkeyManager {
     /// Transforme un evenement hook en action metier. None si rien a faire.
     pub fn handle_event(&self, event: HotkeyEvent) -> Option<HotkeyAction> {
         match event {
-            HotkeyEvent::Pressed { option, timestamp } => {
-                self.on_pressed(option, timestamp)
-            }
-            HotkeyEvent::Released { option, timestamp } => {
-                self.on_released(option, timestamp)
-            }
+            HotkeyEvent::Pressed { slot, timestamp } => self.on_pressed(slot, timestamp),
+            HotkeyEvent::Released { slot, timestamp } => self.on_released(slot, timestamp),
             HotkeyEvent::EscapePressed { timestamp } => self.on_escape(timestamp),
         }
     }
 
-    fn mode_for(&self, _option: HotkeyOption) -> HotkeyMode {
-        // Phase 1d : primary/secondary pourront avoir des modes distincts.
-        self.mode_primary
+    fn mode_for(&self, slot: HotkeySlot) -> HotkeyMode {
+        let g = self.modes.lock();
+        match slot {
+            HotkeySlot::Primary => g.primary,
+            HotkeySlot::Secondary => g.secondary,
+        }
     }
 
-    fn on_pressed(&self, option: HotkeyOption, timestamp: Instant) -> Option<HotkeyAction> {
-        if option == HotkeyOption::None {
-            return None;
-        }
+    fn on_pressed(&self, slot: HotkeySlot, timestamp: Instant) -> Option<HotkeyAction> {
         let mut state = self.state.lock();
 
         // Cooldown.
@@ -113,7 +127,7 @@ impl HotkeyManager {
 
         state.key_down_since = Some(timestamp);
 
-        let mode = self.mode_for(option);
+        let mode = self.mode_for(slot);
         match mode {
             HotkeyMode::PushToTalk => {
                 if !state.is_recording {
@@ -145,17 +159,14 @@ impl HotkeyManager {
         }
     }
 
-    fn on_released(&self, option: HotkeyOption, timestamp: Instant) -> Option<HotkeyAction> {
-        if option == HotkeyOption::None {
-            return None;
-        }
+    fn on_released(&self, slot: HotkeySlot, timestamp: Instant) -> Option<HotkeyAction> {
         let mut state = self.state.lock();
         let pressed_at = state.key_down_since.take();
         let press_duration = pressed_at
             .map(|t| timestamp.duration_since(t))
             .unwrap_or_default();
 
-        let mode = self.mode_for(option);
+        let mode = self.mode_for(slot);
         match mode {
             HotkeyMode::Toggle => {
                 // VoiceInk HotkeyManager L414-415 : release en Toggle arme le
@@ -240,13 +251,13 @@ pub fn dispatch_loop<F>(
 mod tests {
     use super::*;
 
-    const OPT: HotkeyOption = HotkeyOption::RightAlt;
+    const SLOT: HotkeySlot = HotkeySlot::Primary;
 
     fn pressed(t: Instant) -> HotkeyEvent {
-        HotkeyEvent::Pressed { option: OPT, timestamp: t }
+        HotkeyEvent::Pressed { slot: SLOT, timestamp: t }
     }
     fn released(t: Instant) -> HotkeyEvent {
-        HotkeyEvent::Released { option: OPT, timestamp: t }
+        HotkeyEvent::Released { slot: SLOT, timestamp: t }
     }
     fn esc(t: Instant) -> HotkeyEvent {
         HotkeyEvent::EscapePressed { timestamp: t }
@@ -254,7 +265,7 @@ mod tests {
 
     #[test]
     fn toggle_press_starts_then_stops() {
-        let m = HotkeyManager::new(HotkeyMode::Toggle);
+        let m = HotkeyManager::with_modes(HotkeyMode::Toggle, HotkeyMode::Toggle);
         let t0 = Instant::now();
         assert_eq!(m.handle_event(pressed(t0)), Some(HotkeyAction::StartRecording));
         assert_eq!(m.handle_event(released(t0 + Duration::from_millis(100))), None);
@@ -273,7 +284,7 @@ mod tests {
 
     #[test]
     fn toggle_release_is_noop() {
-        let m = HotkeyManager::new(HotkeyMode::Toggle);
+        let m = HotkeyManager::with_modes(HotkeyMode::Toggle, HotkeyMode::Toggle);
         let t0 = Instant::now();
         m.handle_event(pressed(t0));
         // En toggle, le release ne doit jamais produire d'action.
@@ -282,7 +293,7 @@ mod tests {
 
     #[test]
     fn ptt_press_starts_release_stops() {
-        let m = HotkeyManager::new(HotkeyMode::PushToTalk);
+        let m = HotkeyManager::with_modes(HotkeyMode::PushToTalk, HotkeyMode::PushToTalk);
         let t0 = Instant::now();
         assert_eq!(m.handle_event(pressed(t0)), Some(HotkeyAction::StartRecording));
         assert_eq!(
@@ -293,7 +304,7 @@ mod tests {
 
     #[test]
     fn hybrid_long_press_is_ptt() {
-        let m = HotkeyManager::new(HotkeyMode::Hybrid);
+        let m = HotkeyManager::with_modes(HotkeyMode::Hybrid, HotkeyMode::Hybrid);
         let t0 = Instant::now();
         m.handle_event(pressed(t0));
         // Hold >= 500ms : comportement PTT, release = stop.
@@ -305,7 +316,7 @@ mod tests {
 
     #[test]
     fn hybrid_short_press_enters_hands_free() {
-        let m = HotkeyManager::new(HotkeyMode::Hybrid);
+        let m = HotkeyManager::with_modes(HotkeyMode::Hybrid, HotkeyMode::Hybrid);
         let t0 = Instant::now();
         m.handle_event(pressed(t0));
         // Tap court (<500ms) : active hands-free au release.
@@ -317,7 +328,7 @@ mod tests {
 
     #[test]
     fn hybrid_hands_free_next_press_stops() {
-        let m = HotkeyManager::new(HotkeyMode::Hybrid);
+        let m = HotkeyManager::with_modes(HotkeyMode::Hybrid, HotkeyMode::Hybrid);
         let t0 = Instant::now();
         m.handle_event(pressed(t0));
         m.handle_event(released(t0 + Duration::from_millis(100)));
@@ -329,18 +340,29 @@ mod tests {
     }
 
     #[test]
-    fn none_option_is_ignored() {
-        let m = HotkeyManager::new(HotkeyMode::Toggle);
+    fn secondary_slot_uses_its_own_mode() {
+        // Primary = Toggle, Secondary = PushToTalk : verify les deux slots
+        // sont independants.
+        let m = HotkeyManager::with_modes(HotkeyMode::Toggle, HotkeyMode::PushToTalk);
         let t0 = Instant::now();
+        // Press secondary -> PTT start
         assert_eq!(
-            m.handle_event(HotkeyEvent::Pressed { option: HotkeyOption::None, timestamp: t0 }),
-            None
+            m.handle_event(HotkeyEvent::Pressed { slot: HotkeySlot::Secondary, timestamp: t0 }),
+            Some(HotkeyAction::StartRecording)
+        );
+        // Release secondary apres 100ms -> PTT stop
+        assert_eq!(
+            m.handle_event(HotkeyEvent::Released {
+                slot: HotkeySlot::Secondary,
+                timestamp: t0 + Duration::from_millis(100),
+            }),
+            Some(HotkeyAction::StopRecording)
         );
     }
 
     #[test]
     fn double_esc_cancels_when_recording() {
-        let m = HotkeyManager::new(HotkeyMode::Toggle);
+        let m = HotkeyManager::with_modes(HotkeyMode::Toggle, HotkeyMode::Toggle);
         let t0 = Instant::now();
         m.handle_event(pressed(t0));
         // Premier ESC : pas d'action (arm le double-tap).
@@ -354,7 +376,7 @@ mod tests {
 
     #[test]
     fn single_esc_does_not_cancel_when_not_recording() {
-        let m = HotkeyManager::new(HotkeyMode::Toggle);
+        let m = HotkeyManager::with_modes(HotkeyMode::Toggle, HotkeyMode::Toggle);
         let t0 = Instant::now();
         // Pas d'enregistrement en cours : ESC ne fait rien.
         assert_eq!(m.handle_event(esc(t0)), None);
@@ -363,7 +385,7 @@ mod tests {
 
     #[test]
     fn double_esc_outside_window_does_not_cancel() {
-        let m = HotkeyManager::new(HotkeyMode::Toggle);
+        let m = HotkeyManager::with_modes(HotkeyMode::Toggle, HotkeyMode::Toggle);
         let t0 = Instant::now();
         m.handle_event(pressed(t0));
         m.handle_event(esc(t0 + Duration::from_millis(100)));
@@ -373,7 +395,7 @@ mod tests {
 
     #[test]
     fn mark_recording_state_resets_hands_free() {
-        let m = HotkeyManager::new(HotkeyMode::Hybrid);
+        let m = HotkeyManager::with_modes(HotkeyMode::Hybrid, HotkeyMode::Hybrid);
         let t0 = Instant::now();
         m.handle_event(pressed(t0));
         m.handle_event(released(t0 + Duration::from_millis(100)));

@@ -147,6 +147,7 @@ function PermissionCard({
   action?: React.ReactNode;
   tip?: React.ReactNode;
 }) {
+  const { t } = useTranslation();
   const ok = state?.ok ?? false;
   return (
     <Card>
@@ -175,13 +176,18 @@ function PermissionCard({
                 <X className="h-3 w-3 text-amber-500" />
               )}
               <span className={cn(ok ? "text-green-600" : "text-amber-600")}>
-                {state.label}
+                {t(state.label_key, state.label_args ?? undefined)}
               </span>
             </p>
           )}
-          {state?.hint && !state.ok && (
+          {state?.hint_key && !state.ok && (
             <p className="mt-1 text-[11px] text-muted-foreground">
-              {state.hint}
+              {t(state.hint_key)}
+            </p>
+          )}
+          {state?.diagnostic && !state.ok && (
+            <p className="mt-1 text-[10px] text-muted-foreground/70 font-mono break-all">
+              {state.diagnostic}
             </p>
           )}
         </div>

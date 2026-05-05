@@ -18,6 +18,7 @@ import {
   type LLMProviderInfo,
   type LLMSelection,
 } from "@/lib/tauri";
+import { promptDescription, promptTitle } from "@/lib/promptLabels";
 
 export function EnhancementPanel() {
   const { t } = useTranslation();
@@ -468,15 +469,18 @@ export function EnhancementPanel() {
           >
             {prompts.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.title} {p.is_predefined ? t("enhancement.predefined") : ""}
+                {promptTitle(t, p)} {p.is_predefined ? t("enhancement.predefined") : ""}
               </option>
             ))}
           </select>
-          {prompts.find((p) => p.id === activePromptId)?.description && (
-            <p className="text-xs text-muted-foreground">
-              {prompts.find((p) => p.id === activePromptId)?.description}
-            </p>
-          )}
+          {(() => {
+            const active = prompts.find((p) => p.id === activePromptId);
+            if (!active) return null;
+            const desc = promptDescription(t, active);
+            return desc ? (
+              <p className="text-xs text-muted-foreground">{desc}</p>
+            ) : null;
+          })()}
         </div>
 
         <EnhancementScreenContext />
