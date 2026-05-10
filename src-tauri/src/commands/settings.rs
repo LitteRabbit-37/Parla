@@ -219,6 +219,25 @@ pub fn set_close_to_tray(app: AppHandle, enabled: bool) -> Result<(), String> {
     store.save().map_err(|e| e.to_string())
 }
 
+// -- Dictation language (whisper / cloud / parakeet) -----------------------
+
+/// Lit la langue de dictee active. "auto" = auto-detect, code ISO sinon.
+/// Stockee sous la cle `whisper_language` (legacy : la cle existait avant
+/// l'ajout des sources cloud / parakeet, on la garde pour compat).
+#[tauri::command]
+pub fn get_dictation_language(app: AppHandle) -> String {
+    pipeline::get_language(&app).unwrap_or_else(|| "auto".into())
+}
+
+/// Ecrit la langue de dictee. `code` = "auto" | "en" | "fr" | etc.
+/// "auto" est stocke tel quel ; le pipeline le mappe vers None au runtime.
+#[tauri::command]
+pub fn set_dictation_language(app: AppHandle, code: String) -> Result<(), String> {
+    let store = app.store(STORE_FILE).map_err(|e| e.to_string())?;
+    store.set("whisper_language", serde_json::Value::String(code));
+    store.save().map_err(|e| e.to_string())
+}
+
 // -- System mute during recording (VoiceInk MediaController) ----------------
 
 #[tauri::command]

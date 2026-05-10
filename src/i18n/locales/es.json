@@ -261,6 +261,11 @@
     "cloudDescription": "Requiere una clave API.",
     "active": "activo"
   },
+  "dictationLanguage": {
+    "title": "Idioma de dictado",
+    "description": "Idioma usado por el modelo activo ({{model}}). Selecciona 'Auto-deteccion' para que el modelo lo identifique en cada grabacion.",
+    "auto": "Auto-deteccion"
+  },
   "models": {
     "title": "Modelos IA",
     "description": "Elija la fuente de transcripcion por defecto. Los perfiles Power Mode pueden sobrescribirla por app.",

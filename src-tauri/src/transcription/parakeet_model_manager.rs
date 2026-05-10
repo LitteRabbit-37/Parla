@@ -42,7 +42,18 @@ pub struct ParakeetVariant {
     pub speed: f32,
     /// Note de precision de 0 a 1 (idem). Variante int8 perd ~1 point sur l'accuracy.
     pub accuracy: f32,
+    /// Codes ISO supportes : v2 = anglais seul, v3 = 25 langues europeennes
+    /// + auto. Reference VoiceInk LanguageDictionary.forProvider(.fluidAudio).
+    pub language_codes: &'static [&'static str],
 }
+
+/// 25 langues europeennes supportees par Parakeet TDT v3 + "auto" en tete.
+/// Reference VoiceInk LanguageDictionary.forProvider(.fluidAudio).
+pub const PARAKEET_V3_LANGS: &[&str] = &[
+    "auto", "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hr",
+    "hu", "it", "lt", "lv", "mt", "nl", "pl", "pt", "ro", "ru", "sk", "sl",
+    "sv", "uk",
+];
 
 pub const PARAKEET_VARIANTS: &[ParakeetVariant] = &[
     ParakeetVariant {
@@ -63,6 +74,7 @@ pub const PARAKEET_VARIANTS: &[ParakeetVariant] = &[
         notes: "Modele de reference. Anglais uniquement. ~2.5 GB a telecharger.",
         speed: 0.99,
         accuracy: 0.94,
+        language_codes: &["en"],
     },
     ParakeetVariant {
         id: "parakeet-tdt-0.6b-v2-int8",
@@ -81,6 +93,7 @@ pub const PARAKEET_VARIANTS: &[ParakeetVariant] = &[
         notes: "Variante quantizee int8. ~680 MB. Anglais uniquement.",
         speed: 0.99,
         accuracy: 0.93,
+        language_codes: &["en"],
     },
     ParakeetVariant {
         id: "parakeet-tdt-0.6b-v3",
@@ -100,6 +113,7 @@ pub const PARAKEET_VARIANTS: &[ParakeetVariant] = &[
         notes: "Multilingue (EN + 25 langues europeennes). ~2.5 GB.",
         speed: 0.99,
         accuracy: 0.94,
+        language_codes: PARAKEET_V3_LANGS,
     },
     ParakeetVariant {
         id: "parakeet-tdt-0.6b-v3-int8",
@@ -118,6 +132,7 @@ pub const PARAKEET_VARIANTS: &[ParakeetVariant] = &[
         notes: "Multilingue quantizee int8. ~680 MB.",
         speed: 0.99,
         accuracy: 0.93,
+        language_codes: PARAKEET_V3_LANGS,
     },
 ];
 
@@ -139,6 +154,7 @@ pub struct ParakeetModelState {
     pub path: Option<String>,
     pub speed: f32,
     pub accuracy: f32,
+    pub language_codes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -241,6 +257,7 @@ impl ParakeetModelManager {
                 path: downloaded.then(|| dir.to_string_lossy().into_owned()),
                 speed: v.speed,
                 accuracy: v.accuracy,
+                language_codes: v.language_codes.iter().map(|s| s.to_string()).collect(),
             });
         }
         Ok(out)

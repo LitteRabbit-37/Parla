@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { CloudProvidersPanel } from "@/components/CloudProvidersPanel";
+import { DictationLanguagePanel } from "@/components/DictationLanguagePanel";
 import { ModelsPanel } from "@/components/ModelsPanel";
 import { ParakeetPanel } from "@/components/ParakeetPanel";
 import { TranscriptionSourcePanel } from "@/components/TranscriptionSourcePanel";
@@ -65,6 +66,8 @@ export function ModelsPage({
         activeKind={activeKind}
         onViewKindChange={setViewKind}
       />
+
+      <DictationLanguagePanel />
 
       {viewKind === "local" && (
         <ModelsPanel

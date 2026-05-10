@@ -3,9 +3,60 @@
 // Reference VoiceInk : VoiceInk/Models/PredefinedModels.swift (section cloud).
 // Meme ids et meme endpoints.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+use super::super::model::WHISPER_FULL_LANGS;
+
+// Listes de codes ISO supportes par provider, alignees sur VoiceInk
+// Cloud/*Provider.swift `languageCodes`. "auto" en tete = auto-detect.
+
+/// Deepgram Nova 3 : ~50 langues + auto. Source DeepgramProvider.swift.
+const DEEPGRAM_LANGS: &[&str] = &[
+    "auto", "ar", "be", "bg", "bn", "bs", "ca", "cs", "da", "de", "el", "en",
+    "es", "et", "fa", "fi", "fr", "he", "hi", "hr", "hu", "id", "it", "ja",
+    "kn", "ko", "lt", "lv", "mk", "mr", "ms", "nl", "no", "pl", "pt", "ro",
+    "ru", "sk", "sl", "sr", "sv", "ta", "te", "th", "tl", "tr", "uk", "ur",
+    "vi", "zh",
+];
+
+/// ElevenLabs Scribe : 99 langues + auto. Source ElevenLabsProvider.swift.
+const ELEVENLABS_LANGS: &[&str] = &[
+    "auto", "af", "am", "ar", "as", "az", "be", "bg", "bn", "bs", "ca", "cs",
+    "cy", "da", "de", "el", "en", "es", "et", "eu", "fa", "fi", "fil", "fr",
+    "ga", "gl", "gu", "ha", "he", "hi", "hr", "hu", "hy", "id", "ig", "is",
+    "it", "ja", "jw", "ka", "kk", "km", "kn", "ko", "ku", "ky", "lb", "ln",
+    "lo", "lt", "lv", "mi", "mk", "ml", "mn", "mr", "ms", "mt", "my", "ne",
+    "nl", "no", "or", "pa", "pl", "ps", "pt", "ro", "ru", "sd", "sk", "sl",
+    "sn", "so", "sr", "sv", "sw", "ta", "tg", "te", "th", "tr", "uk", "ur",
+    "uz", "vi", "wo", "xh", "yo", "yue", "zh", "zu",
+];
+
+/// Mistral Voxtral : 13 langues + auto. Source MistralProvider.swift.
+const MISTRAL_LANGS: &[&str] = &[
+    "auto", "ar", "de", "en", "es", "fr", "hi", "it", "ja", "ko", "nl", "pt",
+    "ru", "zh",
+];
+
+/// Soniox V4 : 60 langues + auto. Source SonioxProvider.swift.
+const SONIOX_LANGS: &[&str] = &[
+    "auto", "af", "sq", "ar", "az", "eu", "be", "bn", "bs", "bg", "ca", "zh",
+    "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "gl", "de", "el", "gu",
+    "he", "hi", "hu", "id", "it", "ja", "kn", "kk", "ko", "lv", "lt", "mk",
+    "ms", "ml", "mr", "no", "fa", "pl", "pt", "pa", "ro", "ru", "sr", "sk",
+    "sl", "es", "sw", "sv", "tl", "ta", "te", "th", "tr", "uk", "ur", "vi",
+    "cy",
+];
+
+/// Speechmatics : 50+ langues + auto. Source SpeechmaticsProvider.swift.
+const SPEECHMATICS_LANGS: &[&str] = &[
+    "auto", "ar", "ba", "eu", "be", "bn", "bg", "yue", "ca", "hr", "cs", "da",
+    "nl", "en", "et", "fi", "fr", "gl", "de", "el", "he", "hi", "hu", "id",
+    "it", "ja", "ko", "lv", "lt", "ms", "mt", "mr", "mn", "no", "fa", "pl",
+    "pt", "ro", "ru", "sk", "sl", "es", "sw", "sv", "tl", "ta", "th", "tr",
+    "uk", "ur", "vi", "cy", "zh",
+];
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CloudProviderInfo {
     pub id: &'static str,
     pub display_name: &'static str,
@@ -14,7 +65,7 @@ pub struct CloudProviderInfo {
     pub api_key_url: &'static str,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CloudModelInfo {
     pub provider_id: &'static str,
     pub model_id: &'static str,
@@ -27,6 +78,9 @@ pub struct CloudModelInfo {
     pub speed: f32,
     /// Note de precision de 0 a 1 (idem).
     pub accuracy: f32,
+    /// Codes ISO supportes par le modele. "auto" en tete si auto-detect dispo.
+    /// Source : Cloud/*Provider.swift `languageCodes` cote VoiceInk.
+    pub language_codes: &'static [&'static str],
 }
 
 /// Catalogue des providers cloud (id canonique lowercase).
@@ -96,6 +150,8 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         notes: "Whisper v3 turbo sur infrastructure Groq, tres rapide.",
         speed: 0.65,
         accuracy: 0.95,
+        // Groq tourne whisper-large-v3-turbo : memes 99 langues que whisper.cpp.
+        language_codes: WHISPER_FULL_LANGS,
     },
     // ElevenLabs
     CloudModelInfo {
@@ -108,6 +164,7 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         notes: "Batch, transcription generique.",
         speed: 0.7,
         accuracy: 0.98,
+        language_codes: ELEVENLABS_LANGS,
     },
     CloudModelInfo {
         provider_id: "elevenlabs",
@@ -119,6 +176,7 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         notes: "Streaming realtime via WebSocket.",
         speed: 0.99,
         accuracy: 0.98,
+        language_codes: ELEVENLABS_LANGS,
     },
     // Deepgram
     CloudModelInfo {
@@ -131,6 +189,7 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         notes: "Flagship batch + streaming avec mots-cles custom.",
         speed: 0.99,
         accuracy: 0.96,
+        language_codes: DEEPGRAM_LANGS,
     },
     CloudModelInfo {
         provider_id: "deepgram",
@@ -142,6 +201,7 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         notes: "Tune medical (anglais uniquement).",
         speed: 0.99,
         accuracy: 0.96,
+        language_codes: &["en"],
     },
     // Mistral
     CloudModelInfo {
@@ -154,6 +214,7 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         notes: "Batch, auto-detect de langue.",
         speed: 0.95,
         accuracy: 0.98,
+        language_codes: MISTRAL_LANGS,
     },
     CloudModelInfo {
         provider_id: "mistral",
@@ -165,6 +226,7 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         notes: "Streaming realtime WebSocket.",
         speed: 0.99,
         accuracy: 0.98,
+        language_codes: MISTRAL_LANGS,
     },
     // Soniox
     CloudModelInfo {
@@ -177,6 +239,7 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         notes: "Async, 60 langues supportees.",
         speed: 0.95,
         accuracy: 0.98,
+        language_codes: SONIOX_LANGS,
     },
     CloudModelInfo {
         provider_id: "soniox",
@@ -188,6 +251,7 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         notes: "Streaming realtime, tokens granulaires.",
         speed: 0.99,
         accuracy: 0.98,
+        language_codes: SONIOX_LANGS,
     },
     // Speechmatics
     CloudModelInfo {
@@ -200,6 +264,7 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         notes: "Batch (jobs async) et realtime (eu2).",
         speed: 0.99,
         accuracy: 0.98,
+        language_codes: SPEECHMATICS_LANGS,
     },
     // Gemini
     CloudModelInfo {
@@ -212,6 +277,8 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         notes: "Audio inline base64, prompt-driven.",
         speed: 0.7,
         accuracy: 0.97,
+        // Gemini 2.5 declare ~97 langues : on reutilise le set complet whisper.
+        language_codes: WHISPER_FULL_LANGS,
     },
     CloudModelInfo {
         provider_id: "gemini",
@@ -223,6 +290,7 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         notes: "Plus rapide/moins cher.",
         speed: 0.9,
         accuracy: 0.95,
+        language_codes: WHISPER_FULL_LANGS,
     },
 ];
 
@@ -330,5 +398,16 @@ mod tests {
             .iter()
             .any(|m| matches!(m.provider_id, "deepgram" | "elevenlabs"));
         assert!(has_deepgram_or_elevenlabs);
+    }
+
+    #[test]
+    fn all_cloud_models_have_languages() {
+        for m in CLOUD_MODELS {
+            assert!(
+                !m.language_codes.is_empty(),
+                "modele {} sans langues",
+                m.model_id
+            );
+        }
     }
 }

@@ -42,6 +42,8 @@ export type WhisperModelState = {
   speed: number;
   /** Note de precision de 0 a 1 (0 = inconnu). */
   accuracy: number;
+  /** Codes ISO supportes ; "auto" en tete = auto-detect. */
+  language_codes: string[];
 };
 
 export type DownloadProgress = {
@@ -267,6 +269,7 @@ export type ParakeetModelState = {
   path: string | null;
   speed: number;
   accuracy: number;
+  language_codes: string[];
 };
 
 export const api = {
@@ -295,6 +298,10 @@ export const api = {
   setSelectedWhisperModel: (id: string | null) =>
     invoke<void>("set_selected_whisper_model", { id }),
   getSelectedWhisperModel: () => invoke<string | null>("get_selected_whisper_model"),
+
+  getDictationLanguage: () => invoke<string>("get_dictation_language"),
+  setDictationLanguage: (code: string) =>
+    invoke<void>("set_dictation_language", { code }),
 
   getTextProcessingSettings: () =>
     invoke<TextProcessingSettings>("get_text_processing_settings"),
@@ -343,6 +350,7 @@ export const api = {
         notes: string;
         speed: number;
         accuracy: number;
+        language_codes: string[];
       }>
     >("list_cloud_models"),
   setApiKey: (provider: string, key: string) =>

@@ -261,6 +261,11 @@
     "cloudDescription": "Requires an API key.",
     "active": "active"
   },
+  "dictationLanguage": {
+    "title": "Dictation language",
+    "description": "Language used by the active model ({{model}}). Switch to 'Auto-detect' to let the model identify the language at recording time.",
+    "auto": "Auto-detect"
+  },
   "models": {
     "title": "AI Models",
     "description": "Pick the transcription source used by default. Power Mode profiles can override this per app.",

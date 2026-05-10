@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Dictation language selector on the AI Models page, filtered by the languages supported by the active model (Whisper, Parakeet or cloud). Replaces the previously inert `whisper_language` store key with a real UI: each catalog entry now declares its supported ISO codes (per-provider lists ported from VoiceInk `LanguageDictionary.swift` and `Cloud/*Provider.swift`). "Auto-detect" surfaces explicitly when the active model supports it; the pipeline coalesces it back to `None` before calling whisper or any cloud provider. Persisted under the legacy key `whisper_language` (Power Mode profiles already snapshot/restore it).
 - Speed and accuracy ratings on every model card (Whisper, Parakeet and cloud), shown as five colored dots (green / yellow / orange / red) plus a numeric score. Values mirror VoiceInk `TranscriptionModelRegistry.swift` and the per-provider speed/accuracy declared in each `Cloud/*Provider.swift`
 - Two installer variants produced by the CI release workflow: CPU (canonical, auto-update capable) and CUDA (NVIDIA GPU acceleration via cuda-whisper + cuda-llama + cuda-onnx features)
 - `cuda` Cargo meta-feature enabling all three CUDA sub-features at once

@@ -172,9 +172,16 @@ pub fn set_selected_model(app: &AppHandle, id: Option<&str>) -> Result<()> {
 
 pub fn get_language(app: &AppHandle) -> Option<String> {
     let store = app.store(STORE_FILE).ok()?;
-    store
+    let raw = store
         .get(LANGUAGE_KEY)
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .and_then(|v| v.as_str().map(|s| s.to_string()))?;
+    // "auto" est notre valeur explicite pour auto-detect ; le pipeline whisper
+    // (et les providers cloud) attendent None / null dans ce cas.
+    if raw == "auto" || raw.is_empty() {
+        None
+    } else {
+        Some(raw)
+    }
 }
 
 pub fn get_restore_clipboard(app: &AppHandle) -> bool {

@@ -18,7 +18,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncWriteExt;
 use tracing::{info, warn};
 
-use super::model::{find_model, WhisperModelInfo, WHISPER_MODELS};
+use super::model::{find_model, WhisperModelInfo, WHISPER_FULL_LANGS, WHISPER_MODELS};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ModelState {
@@ -37,6 +37,8 @@ pub struct ModelState {
     pub speed: f32,
     /// Note de precision de 0 a 1 (idem).
     pub accuracy: f32,
+    /// Codes ISO supportes par le modele (peut contenir "auto").
+    pub language_codes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -118,6 +120,7 @@ impl ModelManager {
                 imported: false,
                 speed: m.speed,
                 accuracy: m.accuracy,
+                language_codes: m.language_codes.iter().map(|s| s.to_string()).collect(),
             });
         }
         // Ajoute les modeles importes.
@@ -150,6 +153,11 @@ impl ModelManager {
                     // Pas d'info catalogue pour un import, on laisse a 0 pour cacher les ratings cote UI.
                     speed: 0.0,
                     accuracy: 0.0,
+                    // Hypothese raisonnable : le fichier importe est multilingue.
+                    language_codes: WHISPER_FULL_LANGS
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
                 });
             }
         }
