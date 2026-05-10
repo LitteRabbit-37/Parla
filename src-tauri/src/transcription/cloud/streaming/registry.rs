@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use super::assemblyai::AssemblyAiStreaming;
 use super::cartesia::CartesiaStreaming;
 use super::deepgram::DeepgramStreaming;
 use super::elevenlabs::ElevenLabsStreaming;
@@ -26,6 +27,7 @@ impl Default for StreamingRegistry {
                 Arc::new(SpeechmaticsStreaming),
                 Arc::new(XaiStreaming),
                 Arc::new(CartesiaStreaming),
+                Arc::new(AssemblyAiStreaming),
             ],
         }
     }

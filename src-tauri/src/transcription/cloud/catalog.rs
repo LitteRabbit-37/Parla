@@ -63,6 +63,12 @@ const XAI_LANGS: &[&str] = &[
     "th", "tr", "vi",
 ];
 
+/// AssemblyAI Universal : 6 langues + auto. La liste est celle declaree par
+/// VoiceInk AssemblyAIProvider.swift (la realtime / streaming list, identique
+/// pour les 2 modeles cote Parla puisqu'on ne switche pas batch/streaming).
+const ASSEMBLYAI_LANGS: &[&str] =
+    &["auto", "de", "en", "es", "fr", "it", "pt"];
+
 /// Cartesia Ink Whisper : 100 langues, PAS d'auto-detect (langue
 /// obligatoire dans la query string). Source CartesiaProvider.swift.
 const CARTESIA_LANGS: &[&str] = &[
@@ -163,6 +169,12 @@ static PROVIDERS: &[CloudProviderInfo] = &[
         display_name: "Cartesia",
         requires_api_key: true,
         api_key_url: "https://play.cartesia.ai/keys",
+    },
+    CloudProviderInfo {
+        id: "assemblyai",
+        display_name: "AssemblyAI",
+        requires_api_key: true,
+        api_key_url: "https://www.assemblyai.com/app/api-keys",
     },
 ];
 
@@ -350,6 +362,31 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         speed: 0.99,
         accuracy: 0.94,
         language_codes: CARTESIA_LANGS,
+    },
+    // AssemblyAI
+    CloudModelInfo {
+        provider_id: "assemblyai",
+        model_id: "universal-3-pro",
+        display_name: "Universal-3 Pro (AssemblyAI)",
+        supports_batch: true,
+        supports_streaming: true,
+        multilingual: true,
+        notes: "Modele AssemblyAI le plus precis avec realtime. Batch via upload + poll.",
+        speed: 0.94,
+        accuracy: 0.98,
+        language_codes: ASSEMBLYAI_LANGS,
+    },
+    CloudModelInfo {
+        provider_id: "assemblyai",
+        model_id: "universal-streaming",
+        display_name: "Universal-2 (AssemblyAI)",
+        supports_batch: true,
+        supports_streaming: true,
+        multilingual: true,
+        notes: "Universal-2 streaming auto-detect, plus rapide que Universal-3 Pro.",
+        speed: 0.96,
+        accuracy: 0.92,
+        language_codes: ASSEMBLYAI_LANGS,
     },
 ];
 

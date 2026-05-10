@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use super::assemblyai::AssemblyAiProvider;
 use super::cartesia::CartesiaProvider;
 use super::deepgram::DeepgramProvider;
 use super::elevenlabs::ElevenLabsProvider;
@@ -30,6 +31,7 @@ impl Default for CloudRegistry {
                 Arc::new(GeminiProvider),
                 Arc::new(XaiProvider),
                 Arc::new(CartesiaProvider),
+                Arc::new(AssemblyAiProvider),
             ],
         }
     }

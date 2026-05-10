@@ -40,6 +40,7 @@ fn keychain_user(provider: &str) -> &'static str {
         "custom" => "customAPIKey",
         "xai" => "xAIAPIKey",
         "cartesia" => "cartesiaAPIKey",
+        "assemblyai" => "assemblyAIAPIKey",
         _ => "unknownProviderAPIKey",
     }
 }
