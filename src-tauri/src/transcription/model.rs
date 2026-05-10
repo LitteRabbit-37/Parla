@@ -19,9 +19,13 @@ pub struct WhisperModelInfo {
     pub url: &'static str,
     /// Commentaire indicatif sur les performances / cas d'usage.
     pub notes: &'static str,
+    /// Note de vitesse de 0 a 1 (alignee VoiceInk TranscriptionModelRegistry.swift).
+    pub speed: f32,
+    /// Note de precision de 0 a 1 (idem VoiceInk).
+    pub accuracy: f32,
 }
 
-/// Catalogue strictement aligne sur PredefinedModels.swift de VoiceInk.
+/// Catalogue strictement aligne sur VoiceInk TranscriptionModelRegistry.swift.
 pub const WHISPER_MODELS: &[WhisperModelInfo] = &[
     WhisperModelInfo {
         id: "ggml-tiny",
@@ -30,6 +34,8 @@ pub const WHISPER_MODELS: &[WhisperModelInfo] = &[
         multilingual: true,
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
         notes: "Tres rapide, precision limitee. Bon pour tests.",
+        speed: 0.95,
+        accuracy: 0.6,
     },
     WhisperModelInfo {
         id: "ggml-tiny.en",
@@ -38,6 +44,8 @@ pub const WHISPER_MODELS: &[WhisperModelInfo] = &[
         multilingual: false,
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
         notes: "Anglais uniquement, un peu meilleur que tiny multilingue sur EN.",
+        speed: 0.95,
+        accuracy: 0.65,
     },
     WhisperModelInfo {
         id: "ggml-base",
@@ -46,6 +54,8 @@ pub const WHISPER_MODELS: &[WhisperModelInfo] = &[
         multilingual: true,
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
         notes: "Bon compromis taille/precision pour CPU.",
+        speed: 0.85,
+        accuracy: 0.72,
     },
     WhisperModelInfo {
         id: "ggml-base.en",
@@ -54,6 +64,8 @@ pub const WHISPER_MODELS: &[WhisperModelInfo] = &[
         multilingual: false,
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
         notes: "Anglais uniquement, meilleur que base multilingue sur EN.",
+        speed: 0.85,
+        accuracy: 0.75,
     },
     WhisperModelInfo {
         id: "ggml-large-v2",
@@ -62,6 +74,8 @@ pub const WHISPER_MODELS: &[WhisperModelInfo] = &[
         multilingual: true,
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v2.bin",
         notes: "Tres bonne precision, necessite beaucoup de RAM.",
+        speed: 0.3,
+        accuracy: 0.96,
     },
     WhisperModelInfo {
         id: "ggml-large-v3",
@@ -70,6 +84,8 @@ pub const WHISPER_MODELS: &[WhisperModelInfo] = &[
         multilingual: true,
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
         notes: "Derniere generation, precision maximale en CPU lourd.",
+        speed: 0.3,
+        accuracy: 0.98,
     },
     WhisperModelInfo {
         id: "ggml-large-v3-turbo",
@@ -78,6 +94,8 @@ pub const WHISPER_MODELS: &[WhisperModelInfo] = &[
         multilingual: true,
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
         notes: "Large v3 optimise pour la vitesse, recommande avec CUDA.",
+        speed: 0.75,
+        accuracy: 0.97,
     },
     WhisperModelInfo {
         id: "ggml-large-v3-turbo-q5_0",
@@ -86,6 +104,8 @@ pub const WHISPER_MODELS: &[WhisperModelInfo] = &[
         multilingual: true,
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
         notes: "Quantise, tres bon rapport qualite/taille pour CPU.",
+        speed: 0.75,
+        accuracy: 0.95,
     },
 ];
 

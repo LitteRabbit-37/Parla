@@ -38,6 +38,10 @@ export type WhisperModelState = {
   on_disk_bytes: number | null;
   path: string | null;
   imported: boolean;
+  /** Note de vitesse de 0 a 1 (0 = inconnu pour les modeles importes). */
+  speed: number;
+  /** Note de precision de 0 a 1 (0 = inconnu). */
+  accuracy: number;
 };
 
 export type DownloadProgress = {
@@ -261,6 +265,8 @@ export type ParakeetModelState = {
   missing_files: string[];
   on_disk_bytes: number | null;
   path: string | null;
+  speed: number;
+  accuracy: number;
 };
 
 export const api = {
@@ -335,6 +341,8 @@ export const api = {
         supports_streaming: boolean;
         multilingual: boolean;
         notes: string;
+        speed: number;
+        accuracy: number;
       }>
     >("list_cloud_models"),
   setApiKey: (provider: string, key: string) =>

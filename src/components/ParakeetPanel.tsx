@@ -18,6 +18,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { RatingDots } from "@/components/RatingDots";
 import { cn } from "@/lib/utils";
 import { api, type ParakeetModelState } from "@/lib/tauri";
 
@@ -201,7 +202,7 @@ export function ParakeetPanel() {
                     <p className="text-[11px] text-muted-foreground">
                       {m.notes}
                     </p>
-                    <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                    <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
                       <span className="inline-flex items-center gap-1">
                         <Cpu className="h-3 w-3" />
                         {m.is_quantized ? "int8" : "F16"}
@@ -213,6 +214,14 @@ export function ParakeetPanel() {
                           : t("parakeet.englishOnly")}
                       </span>
                       <span>{formatBytes(m.size_bytes)}</span>
+                      <span className="inline-flex items-center gap-1">
+                        {t("common.speed")}
+                        <RatingDots value={m.speed} />
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        {t("common.accuracy")}
+                        <RatingDots value={m.accuracy} />
+                      </span>
                     </div>
                   </div>
                   <div className="flex shrink-0 gap-1">

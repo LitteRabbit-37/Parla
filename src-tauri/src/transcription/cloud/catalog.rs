@@ -23,6 +23,10 @@ pub struct CloudModelInfo {
     pub supports_streaming: bool,
     pub multilingual: bool,
     pub notes: &'static str,
+    /// Note de vitesse de 0 a 1 (alignee VoiceInk providers cloud).
+    pub speed: f32,
+    /// Note de precision de 0 a 1 (idem).
+    pub accuracy: f32,
 }
 
 /// Catalogue des providers cloud (id canonique lowercase).
@@ -75,7 +79,11 @@ static PROVIDERS: &[CloudProviderInfo] = &[
     },
 ];
 
-/// Modeles cloud exactement alignes sur VoiceInk PredefinedModels.swift.
+/// Modeles cloud alignes sur VoiceInk Cloud/*Provider.swift.
+/// Les notes speed/accuracy sont reprises directement des declarations
+/// CloudModel(...) cote VoiceInk. Pour les couples batch+streaming dedoubles
+/// (Mistral / Soniox) on attribue 0.95/0.99 selon la branche : VoiceInk a
+/// merge ces couples en un seul card mais Parla garde le split.
 pub const CLOUD_MODELS: &[CloudModelInfo] = &[
     // Groq
     CloudModelInfo {
@@ -86,6 +94,8 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         supports_streaming: false,
         multilingual: true,
         notes: "Whisper v3 turbo sur infrastructure Groq, tres rapide.",
+        speed: 0.65,
+        accuracy: 0.95,
     },
     // ElevenLabs
     CloudModelInfo {
@@ -96,6 +106,8 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         supports_streaming: false,
         multilingual: true,
         notes: "Batch, transcription generique.",
+        speed: 0.7,
+        accuracy: 0.98,
     },
     CloudModelInfo {
         provider_id: "elevenlabs",
@@ -105,6 +117,8 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         supports_streaming: true,
         multilingual: true,
         notes: "Streaming realtime via WebSocket.",
+        speed: 0.99,
+        accuracy: 0.98,
     },
     // Deepgram
     CloudModelInfo {
@@ -115,6 +129,8 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         supports_streaming: true,
         multilingual: true,
         notes: "Flagship batch + streaming avec mots-cles custom.",
+        speed: 0.99,
+        accuracy: 0.96,
     },
     CloudModelInfo {
         provider_id: "deepgram",
@@ -124,6 +140,8 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         supports_streaming: true,
         multilingual: false,
         notes: "Tune medical (anglais uniquement).",
+        speed: 0.99,
+        accuracy: 0.96,
     },
     // Mistral
     CloudModelInfo {
@@ -134,6 +152,8 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         supports_streaming: false,
         multilingual: true,
         notes: "Batch, auto-detect de langue.",
+        speed: 0.95,
+        accuracy: 0.98,
     },
     CloudModelInfo {
         provider_id: "mistral",
@@ -143,6 +163,8 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         supports_streaming: true,
         multilingual: true,
         notes: "Streaming realtime WebSocket.",
+        speed: 0.99,
+        accuracy: 0.98,
     },
     // Soniox
     CloudModelInfo {
@@ -153,6 +175,8 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         supports_streaming: false,
         multilingual: true,
         notes: "Async, 60 langues supportees.",
+        speed: 0.95,
+        accuracy: 0.98,
     },
     CloudModelInfo {
         provider_id: "soniox",
@@ -162,6 +186,8 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         supports_streaming: true,
         multilingual: true,
         notes: "Streaming realtime, tokens granulaires.",
+        speed: 0.99,
+        accuracy: 0.98,
     },
     // Speechmatics
     CloudModelInfo {
@@ -172,6 +198,8 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         supports_streaming: true,
         multilingual: true,
         notes: "Batch (jobs async) et realtime (eu2).",
+        speed: 0.99,
+        accuracy: 0.98,
     },
     // Gemini
     CloudModelInfo {
@@ -182,6 +210,8 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         supports_streaming: false,
         multilingual: true,
         notes: "Audio inline base64, prompt-driven.",
+        speed: 0.7,
+        accuracy: 0.97,
     },
     CloudModelInfo {
         provider_id: "gemini",
@@ -191,6 +221,8 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         supports_streaming: false,
         multilingual: true,
         notes: "Plus rapide/moins cher.",
+        speed: 0.9,
+        accuracy: 0.95,
     },
 ];
 

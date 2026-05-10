@@ -50,7 +50,9 @@
     "selected": "Selected",
     "unselected": "Unselected",
     "loadMore": "Load more",
-    "none": "None"
+    "none": "None",
+    "speed": "Speed",
+    "accuracy": "Accuracy"
   },
   "sidebar": {
     "dashboard": "Dashboard",

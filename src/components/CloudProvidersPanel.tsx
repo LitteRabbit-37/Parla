@@ -22,6 +22,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { RatingDots } from "@/components/RatingDots";
 import { cn } from "@/lib/utils";
 import { api, type TranscriptionSource as Source } from "@/lib/tauri";
 
@@ -41,6 +42,8 @@ type CloudModel = {
   supports_streaming: boolean;
   multilingual: boolean;
   notes: string;
+  speed: number;
+  accuracy: number;
 };
 
 export function CloudProvidersPanel() {
@@ -247,6 +250,16 @@ export function CloudProvidersPanel() {
                       )}
                     </div>
                     <p className="text-xs text-muted-foreground">{m.notes}</p>
+                    <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        {t("common.speed")}
+                        <RatingDots value={m.speed} />
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        {t("common.accuracy")}
+                        <RatingDots value={m.accuracy} />
+                      </span>
+                    </div>
                   </div>
                   {selected && (
                     <span className="text-xs font-medium text-primary">

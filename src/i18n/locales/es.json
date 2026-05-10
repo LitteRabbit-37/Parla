@@ -50,7 +50,9 @@
     "selected": "Seleccionado",
     "unselected": "Deseleccionar",
     "loadMore": "Cargar mas",
-    "none": "Ninguno"
+    "none": "Ninguno",
+    "speed": "Velocidad",
+    "accuracy": "Precision"
   },
   "sidebar": {
     "dashboard": "Panel",

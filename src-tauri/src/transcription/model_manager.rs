@@ -33,6 +33,10 @@ pub struct ModelState {
     pub path: Option<String>,
     /// true si c'est un modele importe par l'utilisateur (hors catalogue).
     pub imported: bool,
+    /// Note de vitesse de 0 a 1 (alignee VoiceInk).
+    pub speed: f32,
+    /// Note de precision de 0 a 1 (idem).
+    pub accuracy: f32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -112,6 +116,8 @@ impl ModelManager {
                     None
                 },
                 imported: false,
+                speed: m.speed,
+                accuracy: m.accuracy,
             });
         }
         // Ajoute les modeles importes.
@@ -141,6 +147,9 @@ impl ModelManager {
                     on_disk_bytes: Some(size),
                     path: Some(p.to_string_lossy().into_owned()),
                     imported: true,
+                    // Pas d'info catalogue pour un import, on laisse a 0 pour cacher les ratings cote UI.
+                    speed: 0.0,
+                    accuracy: 0.0,
                 });
             }
         }

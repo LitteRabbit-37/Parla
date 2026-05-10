@@ -38,6 +38,10 @@ pub struct ParakeetVariant {
     /// Liste des fichiers attendus dans le repertoire du modele.
     pub files: &'static [&'static str],
     pub notes: &'static str,
+    /// Note de vitesse de 0 a 1 (alignee VoiceInk FluidAudioModel).
+    pub speed: f32,
+    /// Note de precision de 0 a 1 (idem). Variante int8 perd ~1 point sur l'accuracy.
+    pub accuracy: f32,
 }
 
 pub const PARAKEET_VARIANTS: &[ParakeetVariant] = &[
@@ -57,6 +61,8 @@ pub const PARAKEET_VARIANTS: &[ParakeetVariant] = &[
             "decoder_joint-model.onnx",
         ],
         notes: "Modele de reference. Anglais uniquement. ~2.5 GB a telecharger.",
+        speed: 0.99,
+        accuracy: 0.94,
     },
     ParakeetVariant {
         id: "parakeet-tdt-0.6b-v2-int8",
@@ -73,6 +79,8 @@ pub const PARAKEET_VARIANTS: &[ParakeetVariant] = &[
             "decoder_joint-model.int8.onnx",
         ],
         notes: "Variante quantizee int8. ~680 MB. Anglais uniquement.",
+        speed: 0.99,
+        accuracy: 0.93,
     },
     ParakeetVariant {
         id: "parakeet-tdt-0.6b-v3",
@@ -90,6 +98,8 @@ pub const PARAKEET_VARIANTS: &[ParakeetVariant] = &[
             "decoder_joint-model.onnx",
         ],
         notes: "Multilingue (EN + 25 langues europeennes). ~2.5 GB.",
+        speed: 0.99,
+        accuracy: 0.94,
     },
     ParakeetVariant {
         id: "parakeet-tdt-0.6b-v3-int8",
@@ -106,6 +116,8 @@ pub const PARAKEET_VARIANTS: &[ParakeetVariant] = &[
             "decoder_joint-model.int8.onnx",
         ],
         notes: "Multilingue quantizee int8. ~680 MB.",
+        speed: 0.99,
+        accuracy: 0.93,
     },
 ];
 
@@ -125,6 +137,8 @@ pub struct ParakeetModelState {
     pub missing_files: Vec<String>,
     pub on_disk_bytes: Option<u64>,
     pub path: Option<String>,
+    pub speed: f32,
+    pub accuracy: f32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -225,6 +239,8 @@ impl ParakeetModelManager {
                 missing_files: missing,
                 on_disk_bytes,
                 path: downloaded.then(|| dir.to_string_lossy().into_owned()),
+                speed: v.speed,
+                accuracy: v.accuracy,
             });
         }
         Ok(out)

@@ -11,6 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { RatingDots } from "@/components/RatingDots";
 import { cn } from "@/lib/utils";
 import {
   api,
@@ -213,6 +214,18 @@ export function ModelsPanel({ selectedId, onSelect }: Props) {
                       m.on_disk_bytes != null &&
                       ` - ${t("whisperModels.onDisk", { size: formatBytes(m.on_disk_bytes) })}`}
                   </p>
+                  {m.speed > 0 && (
+                    <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        {t("common.speed")}
+                        <RatingDots value={m.speed} />
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        {t("common.accuracy")}
+                        <RatingDots value={m.accuracy} />
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="flex flex-col items-end gap-1.5">
                   {m.downloaded ? (
