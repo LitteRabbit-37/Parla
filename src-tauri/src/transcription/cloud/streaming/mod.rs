@@ -9,6 +9,7 @@
 // L41 : 16-bit PCM, 16 kHz, mono, little-endian. Deja le format natif de
 // AudioRecorder de Parla.
 
+pub mod cartesia;
 pub mod deepgram;
 pub mod elevenlabs;
 pub mod mistral;

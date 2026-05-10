@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use super::cartesia::CartesiaProvider;
 use super::deepgram::DeepgramProvider;
 use super::elevenlabs::ElevenLabsProvider;
 use super::gemini::GeminiProvider;
@@ -28,6 +29,7 @@ impl Default for CloudRegistry {
                 Arc::new(SpeechmaticsProvider),
                 Arc::new(GeminiProvider),
                 Arc::new(XaiProvider),
+                Arc::new(CartesiaProvider),
             ],
         }
     }

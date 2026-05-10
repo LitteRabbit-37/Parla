@@ -3,6 +3,7 @@
 // Reference VoiceInk : VoiceInk/Transcription/Batch/CloudTranscriptionService.swift
 // + implementations LLMkit pour chaque provider.
 
+pub mod cartesia;
 pub mod catalog;
 pub mod deepgram;
 pub mod elevenlabs;

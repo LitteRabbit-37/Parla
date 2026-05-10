@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use super::cartesia::CartesiaStreaming;
 use super::deepgram::DeepgramStreaming;
 use super::elevenlabs::ElevenLabsStreaming;
 use super::mistral::MistralStreaming;
@@ -24,6 +25,7 @@ impl Default for StreamingRegistry {
                 Arc::new(SonioxStreaming),
                 Arc::new(SpeechmaticsStreaming),
                 Arc::new(XaiStreaming),
+                Arc::new(CartesiaStreaming),
             ],
         }
     }
