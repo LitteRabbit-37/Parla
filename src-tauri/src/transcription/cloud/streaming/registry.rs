@@ -8,6 +8,7 @@ use super::mistral::MistralStreaming;
 use super::session::StreamingProvider;
 use super::soniox::SonioxStreaming;
 use super::speechmatics::SpeechmaticsStreaming;
+use super::xai::XaiStreaming;
 
 pub struct StreamingRegistry {
     providers: Vec<Arc<dyn StreamingProvider>>,
@@ -22,6 +23,7 @@ impl Default for StreamingRegistry {
                 Arc::new(MistralStreaming),
                 Arc::new(SonioxStreaming),
                 Arc::new(SpeechmaticsStreaming),
+                Arc::new(XaiStreaming),
             ],
         }
     }

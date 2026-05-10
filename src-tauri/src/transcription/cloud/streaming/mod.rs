@@ -17,6 +17,7 @@ pub mod service;
 pub mod session;
 pub mod soniox;
 pub mod speechmatics;
+pub mod xai;
 
 pub use registry::StreamingRegistry;
 pub use service::start_streaming;

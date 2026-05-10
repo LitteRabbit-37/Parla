@@ -10,6 +10,7 @@ use super::mistral::MistralProvider;
 use super::provider::CloudTranscriptionProvider;
 use super::soniox::SonioxProvider;
 use super::speechmatics::SpeechmaticsProvider;
+use super::xai::XaiProvider;
 
 pub struct CloudRegistry {
     providers: Vec<Arc<dyn CloudTranscriptionProvider>>,
@@ -26,6 +27,7 @@ impl Default for CloudRegistry {
                 Arc::new(SonioxProvider),
                 Arc::new(SpeechmaticsProvider),
                 Arc::new(GeminiProvider),
+                Arc::new(XaiProvider),
             ],
         }
     }

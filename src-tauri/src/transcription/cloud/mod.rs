@@ -15,5 +15,6 @@ pub mod registry;
 pub mod soniox;
 pub mod speechmatics;
 pub mod streaming;
+pub mod xai;
 
 pub use registry::CloudRegistry;

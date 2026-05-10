@@ -38,6 +38,7 @@ fn keychain_user(provider: &str) -> &'static str {
         "anthropic" => "anthropicAPIKey",
         "openrouter" => "openRouterAPIKey",
         "custom" => "customAPIKey",
+        "xai" => "xAIAPIKey",
         _ => "unknownProviderAPIKey",
     }
 }

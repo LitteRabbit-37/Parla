@@ -56,6 +56,13 @@ const SPEECHMATICS_LANGS: &[&str] = &[
     "uk", "ur", "vi", "cy", "zh",
 ];
 
+/// xAI Grok STT : 25 langues + auto. Source XAIProvider.swift.
+const XAI_LANGS: &[&str] = &[
+    "auto", "ar", "cs", "da", "nl", "en", "fil", "fr", "de", "hi", "id",
+    "it", "ja", "ko", "mk", "ms", "fa", "pl", "pt", "ro", "ru", "es", "sv",
+    "th", "tr", "vi",
+];
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CloudProviderInfo {
     pub id: &'static str,
@@ -130,6 +137,12 @@ static PROVIDERS: &[CloudProviderInfo] = &[
         display_name: "Google Gemini",
         requires_api_key: true,
         api_key_url: "https://aistudio.google.com/apikey",
+    },
+    CloudProviderInfo {
+        id: "xai",
+        display_name: "xAI",
+        requires_api_key: true,
+        api_key_url: "https://console.x.ai",
     },
 ];
 
@@ -291,6 +304,19 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
         speed: 0.9,
         accuracy: 0.95,
         language_codes: WHISPER_FULL_LANGS,
+    },
+    // xAI
+    CloudModelInfo {
+        provider_id: "xai",
+        model_id: "grok-stt",
+        display_name: "Grok (xAI)",
+        supports_batch: true,
+        supports_streaming: true,
+        multilingual: true,
+        notes: "Speech-to-text xAI, batch + streaming WebSocket realtime.",
+        speed: 0.99,
+        accuracy: 0.98,
+        language_codes: XAI_LANGS,
     },
 ];
 
