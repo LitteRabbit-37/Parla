@@ -16,6 +16,7 @@ import {
   Type,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { ModelPerformancePanel } from "@/components/ModelPerformancePanel";
 import { api, type TranscriptionRecord } from "@/lib/tauri";
 
 type Metrics = {
@@ -133,6 +134,8 @@ export function DashboardPanel() {
           subtitle={t("dashboard.charactersSubtitle")}
         />
       </div>
+
+      <ModelPerformancePanel />
 
       <Card className="flex items-center gap-3 p-4">
         <Speaker className="h-4 w-4 text-muted-foreground" />

@@ -280,6 +280,117 @@ pub fn count(conn: &Connection) -> Result<i64> {
         .map_err(|e| anyhow!("count: {e}"))
 }
 
+// -- Metrics aggregation par modele ----------------------------------------
+//
+// Reference VoiceInk : Views/Metrics/ModelPerformancePanel.swift +
+// ModelPerformanceAccumulator. Le panel ne consomme que des sums et counts ;
+// SQLite peut tout faire en une requete par section (transcription /
+// enhancement). Pas de table separee : on agrege directement la table
+// `transcriptions` (status='completed').
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TranscriptionModelMetric {
+    pub name: String,
+    pub session_count: i64,
+    pub total_audio_sec: f64,
+    pub total_processing_sec: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EnhancementModelMetric {
+    pub name: String,
+    pub session_count: i64,
+    pub total_duration_sec: f64,
+}
+
+pub fn aggregate_transcription_metrics(
+    conn: &Connection,
+    cutoff: Option<DateTime<Utc>>,
+) -> Result<Vec<TranscriptionModelMetric>> {
+    let mut sql = String::from(
+        "SELECT
+            transcription_model_name,
+            COUNT(*) AS session_count,
+            COALESCE(SUM(duration_sec), 0.0) AS total_audio_sec,
+            COALESCE(SUM(transcription_duration_sec), 0.0) AS total_processing_sec
+         FROM transcriptions
+         WHERE status = 'completed'
+           AND transcription_model_name IS NOT NULL
+           AND transcription_model_name != ''
+           AND transcription_duration_sec IS NOT NULL
+           AND transcription_duration_sec > 0",
+    );
+    let cutoff_str = cutoff.map(|c| c.to_rfc3339());
+    if cutoff_str.is_some() {
+        sql.push_str(" AND timestamp >= ?1");
+    }
+    sql.push_str(
+        " GROUP BY transcription_model_name
+          ORDER BY total_processing_sec / session_count ASC",
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+    let map = |row: &Row<'_>| -> rusqlite::Result<TranscriptionModelMetric> {
+        Ok(TranscriptionModelMetric {
+            name: row.get(0)?,
+            session_count: row.get(1)?,
+            total_audio_sec: row.get(2)?,
+            total_processing_sec: row.get(3)?,
+        })
+    };
+    let rows: Vec<_> = if let Some(c) = cutoff_str {
+        stmt.query_map(params![c], map)?
+            .collect::<rusqlite::Result<_>>()?
+    } else {
+        stmt.query_map([], map)?
+            .collect::<rusqlite::Result<_>>()?
+    };
+    Ok(rows)
+}
+
+pub fn aggregate_enhancement_metrics(
+    conn: &Connection,
+    cutoff: Option<DateTime<Utc>>,
+) -> Result<Vec<EnhancementModelMetric>> {
+    let mut sql = String::from(
+        "SELECT
+            ai_enhancement_model_name,
+            COUNT(*) AS session_count,
+            COALESCE(SUM(enhancement_duration_sec), 0.0) AS total_duration_sec
+         FROM transcriptions
+         WHERE status = 'completed'
+           AND ai_enhancement_model_name IS NOT NULL
+           AND ai_enhancement_model_name != ''
+           AND enhancement_duration_sec IS NOT NULL
+           AND enhancement_duration_sec > 0",
+    );
+    let cutoff_str = cutoff.map(|c| c.to_rfc3339());
+    if cutoff_str.is_some() {
+        sql.push_str(" AND timestamp >= ?1");
+    }
+    sql.push_str(
+        " GROUP BY ai_enhancement_model_name
+          ORDER BY total_duration_sec / session_count ASC",
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+    let map = |row: &Row<'_>| -> rusqlite::Result<EnhancementModelMetric> {
+        Ok(EnhancementModelMetric {
+            name: row.get(0)?,
+            session_count: row.get(1)?,
+            total_duration_sec: row.get(2)?,
+        })
+    };
+    let rows: Vec<_> = if let Some(c) = cutoff_str {
+        stmt.query_map(params![c], map)?
+            .collect::<rusqlite::Result<_>>()?
+    } else {
+        stmt.query_map([], map)?
+            .collect::<rusqlite::Result<_>>()?
+    };
+    Ok(rows)
+}
+
 /// Supprime les transcriptions plus vieilles que `older_than`. Renvoie
 /// les audio_file_name supprimees (pour purge des WAV).
 pub fn delete_older_than(

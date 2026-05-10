@@ -4,6 +4,7 @@ pub mod enhancement;
 pub mod history;
 pub mod hotkey;
 pub mod llm_models;
+pub mod metrics;
 pub mod models;
 pub mod parakeet;
 pub mod permissions;

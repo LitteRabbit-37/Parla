@@ -116,6 +116,25 @@
     "historyCount": "{{count}} transcription(s) en historique",
     "historyHint": "Consultez la section Historique pour rechercher, exporter ou supprimer."
   },
+  "modelPerformance": {
+    "title": "Performance des modeles",
+    "description": "Detail par modele de la vitesse et du temps de traitement sur la periode choisie.",
+    "transcriptionModels": "Modeles de transcription",
+    "enhancementModels": "Modeles d'enhancement",
+    "sessionCount": "{{count}} session(s)",
+    "fasterRealtime": "Plus rapide que le temps reel",
+    "slowerRealtime": "Plus lent que le temps reel",
+    "avgAudio": "Audio moyen",
+    "avgProcessing": "Traitement moyen",
+    "avgEnhancement": "Enhancement moyen",
+    "empty": "Pas encore de donnees pour cette periode. Lance une transcription et reviens.",
+    "period": {
+      "last7Days": "7 derniers jours",
+      "last30Days": "30 derniers jours",
+      "thisYear": "Cette annee",
+      "allTime": "Tout"
+    }
+  },
   "updater": {
     "newVersion": "Nouvelle version {{version}} disponible",
     "install": "Installer",

@@ -80,6 +80,7 @@ use commands::history::{
     count_history, delete_history_item, export_history_csv, get_history_item,
     get_retention_settings, list_history, run_history_cleanup, set_retention_settings,
 };
+use commands::metrics::get_model_performance_metrics;
 use commands::screen_context::{
     capture_screen_context_preview, clear_screen_context, get_screen_context_cached,
     get_screen_context_enabled, set_screen_context_enabled,
@@ -340,6 +341,7 @@ pub fn run() {
             get_retention_settings,
             set_retention_settings,
             run_history_cleanup,
+            get_model_performance_metrics,
             check_permissions,
             set_autostart_enabled,
             open_privacy_microphone,

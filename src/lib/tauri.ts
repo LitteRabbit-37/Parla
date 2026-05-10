@@ -256,6 +256,26 @@ export type RetentionSettings = {
   audio_retention_days: number;
 };
 
+export type MetricsPeriod = "last_7_days" | "last_30_days" | "this_year" | "all_time";
+
+export type TranscriptionModelMetric = {
+  name: string;
+  session_count: number;
+  total_audio_sec: number;
+  total_processing_sec: number;
+};
+
+export type EnhancementModelMetric = {
+  name: string;
+  session_count: number;
+  total_duration_sec: number;
+};
+
+export type ModelPerformanceMetrics = {
+  transcription_models: TranscriptionModelMetric[];
+  enhancement_models: EnhancementModelMetric[];
+};
+
 export type ParakeetModelState = {
   id: string;
   display_name: string;
@@ -517,6 +537,8 @@ export const api = {
   countHistory: () => invoke<number>("count_history"),
   exportHistoryCsv: (ids: string[]) =>
     invoke<string | null>("export_history_csv", { ids }),
+  getModelPerformanceMetrics: (period: MetricsPeriod) =>
+    invoke<ModelPerformanceMetrics>("get_model_performance_metrics", { period }),
   getRetentionSettings: () =>
     invoke<RetentionSettings>("get_retention_settings"),
   setRetentionSettings: (settings: RetentionSettings) =>
