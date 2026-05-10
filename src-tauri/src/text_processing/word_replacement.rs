@@ -11,20 +11,24 @@ use fancy_regex::Regex as FancyRegex;
 use crate::db::word_replacement::WordReplacement;
 
 /// Applique en cascade toutes les regles enabled sur `text`.
-/// L'ordre est celui retourne par la DB (date desc cote list_enabled).
+/// Tri longest-first : evite qu'une regle courte qui matche un sous-fragment
+/// d'une regle longue ne casse cette derniere (ex "good" devant "good morning").
+/// Cf VoiceInk WordReplacementService.swift commit 620a843.
 pub fn apply(text: &str, rules: &[WordReplacement]) -> String {
     let mut current = text.to_string();
 
-    for rule in rules {
-        if !rule.is_enabled {
-            continue;
-        }
-        let variants: Vec<&str> = rule
+    let mut sorted_rules: Vec<&WordReplacement> =
+        rules.iter().filter(|r| r.is_enabled).collect();
+    sorted_rules.sort_by(|a, b| b.original_text.len().cmp(&a.original_text.len()));
+
+    for rule in sorted_rules {
+        let mut variants: Vec<&str> = rule
             .original_text
             .split(',')
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
             .collect();
+        variants.sort_by(|a, b| b.len().cmp(&a.len()));
 
         for original in variants {
             if original.is_empty() {
@@ -42,11 +46,12 @@ pub fn apply(text: &str, rules: &[WordReplacement]) -> String {
 }
 
 fn replace_with_boundaries(haystack: &str, needle: &str, replacement: &str) -> String {
-    // Echappement + \\b...\\b case-insensitive. fancy-regex necessaire sinon OK
-    // avec le crate regex standard. On utilise fancy pour garder la coherence
-    // avec le filter (et pour supporter Unicode word boundaries si necessaire).
+    // Lookarounds plutot que \b : la ponctuation devient frontiere (regle
+    // "hello" matche "hello!") et "_" n'est plus traite comme word char.
+    // Cf VoiceInk WordReplacementService.swift commit 620a843. fancy-regex
+    // requis pour les lookarounds (le crate regex ne les supporte pas).
     let escaped = fancy_regex::escape(needle);
-    let pattern = format!(r"(?i)\b{escaped}\b");
+    let pattern = format!(r"(?i)(?<![a-zA-Z0-9]){escaped}(?![a-zA-Z0-9])");
     match FancyRegex::new(&pattern) {
         Ok(re) => re.replace_all(haystack, replacement).into_owned(),
         Err(_) => replace_substring_ci(haystack, needle, replacement),
@@ -154,5 +159,44 @@ mod tests {
         assert!(!uses_word_boundaries("สวัสดี"));
         assert!(uses_word_boundaries("hello"));
         assert!(uses_word_boundaries("docker, k8s"));
+    }
+
+    #[test]
+    fn longest_first_overlapping_rules() {
+        // Sans tri longest-first, "good" appliquee en premier ecraserait "good"
+        // dans "good morning" et la regle "good morning" ne matcherait plus.
+        let rules = vec![
+            rule("1", "good", "GOOD"),
+            rule("2", "good morning", "Hello"),
+        ];
+        let out = apply("good morning everyone", &rules);
+        assert_eq!(out, "Hello everyone");
+    }
+
+    #[test]
+    fn longest_first_overlapping_variants() {
+        // Meme bug a l'echelle d'une seule regle CSV : "new" doit etre tente
+        // apres "new york" pour ne pas casser le match plus specifique.
+        let rules = vec![rule("1", "new, new york", "AAA")];
+        let out = apply("new york", &rules);
+        assert_eq!(out, "AAA");
+    }
+
+    #[test]
+    fn punctuation_acts_as_boundary() {
+        // Les lookarounds permettent de matcher "hello" suivi/precede de
+        // ponctuation (que \b ASCII gerait deja, mais on fixe le comportement).
+        let rules = vec![rule("1", "hello", "Hi")];
+        let out = apply("hello! Hello, world.", &rules);
+        assert_eq!(out, "Hi! Hi, world.");
+    }
+
+    #[test]
+    fn underscore_is_not_word_char() {
+        // \b traite "_" comme word, donc "\bhello\b" ne matchait pas "_hello_".
+        // Lookarounds [a-zA-Z0-9] excluent "_" et le match passe.
+        let rules = vec![rule("1", "hello", "Hi")];
+        let out = apply("_hello_ and __hello__", &rules);
+        assert_eq!(out, "_Hi_ and __Hi__");
     }
 }

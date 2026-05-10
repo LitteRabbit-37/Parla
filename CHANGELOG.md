@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Toggle mode hotkey never ending a recording via press (now sets hands-free on release, matching VoiceInk)
 - Cloud transcription providers hanging indefinitely on network failure (120s timeout + 15s connect timeout)
+- Word replacement now applies longest rules first, so a shorter rule no longer cannibalizes a more specific one (e.g. "good" no longer breaks "good morning"). Variants inside a single CSV rule are sorted longest-first as well. Boundary regex switched from `\b` to lookarounds `(?<![a-zA-Z0-9])...(?![a-zA-Z0-9])` so punctuation acts as a word boundary and `_` is no longer treated as a word character. Mirrors VoiceInk commit 620a843.
 
 ## [0.1.0] - 2026-04-17
 
