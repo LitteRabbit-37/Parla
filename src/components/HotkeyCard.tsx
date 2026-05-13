@@ -186,6 +186,7 @@ export function HotkeyCard() {
               slot={config.primary}
               onTriggerSelect={(v) => onTriggerChange("primary", v)}
               onModeSelect={(m) => updateSlot("primary", { mode: m })}
+              onEditCombo={() => setRecorderTarget("primary")}
             />
 
             {showSecondary && (
@@ -195,6 +196,7 @@ export function HotkeyCard() {
                   slot={config.secondary}
                   onTriggerSelect={(v) => onTriggerChange("secondary", v)}
                   onModeSelect={(m) => updateSlot("secondary", { mode: m })}
+                  onEditCombo={() => setRecorderTarget("secondary")}
                 />
                 <Button
                   size="sm"
@@ -244,11 +246,13 @@ function SlotEditor({
   slot,
   onTriggerSelect,
   onModeSelect,
+  onEditCombo,
 }: {
   label: string;
   slot: HotkeySlotConfig;
   onTriggerSelect: (v: string) => void;
   onModeSelect: (m: HotkeyMode) => void;
+  onEditCombo: () => void;
 }) {
   const { t } = useTranslation();
   const value = selectValueOf(slot.trigger);
@@ -289,9 +293,14 @@ function SlotEditor({
         </select>
 
         {slot.trigger.kind === "combo" && (
-          <span className="flex h-9 items-center rounded-md border bg-muted/30 px-2 font-mono text-xs">
+          <button
+            type="button"
+            onClick={onEditCombo}
+            title={t("hotkey.editCombo")}
+            className="flex h-9 items-center rounded-md border bg-muted/30 px-2 font-mono text-xs transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
             {formatCombo(slot.trigger)}
-          </span>
+          </button>
         )}
         {slot.trigger.kind === "modifier" && (
           <span className="flex h-9 items-center px-2 text-xs text-muted-foreground">

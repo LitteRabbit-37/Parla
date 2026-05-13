@@ -705,7 +705,9 @@
     "record": {
       "title": "Enregistrer une combinaison personnalisee",
       "hint": "Presse les touches que tu veux utiliser. Il faut au moins un modifier et une touche finale (ex Ctrl + Alt + R, F13, Win + Espace). Esc annule.",
-      "waiting": "Presse ta combinaison..."
-    }
+      "waiting": "Presse ta combinaison...",
+      "needsModifier": "Une touche seule n'est autorisee que pour F1-F24, Insert, Delete, Home, End, PageUp/Down, Pause, PrintScreen. Sinon ajoute Ctrl, Alt, Shift ou Win."
+    },
+    "editCombo": "Cliquer pour modifier la combinaison"
   }
 }

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-05-13
+
+Bug-fix release for the custom recording shortcut (issue #3).
+
+### Fixed
+- Custom shortcut recorder now ignores standalone modifier keypresses (Ctrl, Shift, Alt). Pressing Ctrl alone used to be captured as "Ctrl + Ctrl" because WebView2 emits the generic VK codes (0x10/0x11/0x12) which were missing from the recorder's modifier filter, so the modifier passed through as if it were a final key. With those VKs added, a combination like Ctrl + F can now be recorded correctly.
+- Custom shortcut recorder now rejects standalone text-producing keys (letters, digits, Space, ...) and shows an inline error. A bare key like F would otherwise trigger the recorder on every keystroke in any text field. Standalone keys are still allowed for non-textual keys (F1-F24, Pause, PrintScreen, Insert, Delete, Home, End, PageUp/Down).
+- Recorded custom combination is now editable: the displayed combo in Settings is a clickable button that re-opens the recorder. Previously, once a combination was captured, the only way to change it was to switch back to a modifier-only option or reset all hotkey settings.
+
 ## [0.3.0] - 2026-05-10
 
 Major catch-up with VoiceInk: three new cloud STT providers, a real

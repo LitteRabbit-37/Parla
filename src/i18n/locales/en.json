@@ -705,7 +705,9 @@
     "record": {
       "title": "Record a custom combination",
       "hint": "Press the keys you want to use. Need at least one modifier and a final key (e.g. Ctrl + Alt + R, F13, Win + Space). Esc cancels.",
-      "waiting": "Press your combination..."
-    }
+      "waiting": "Press your combination...",
+      "needsModifier": "A standalone key is only allowed for F1-F24, Insert, Delete, Home, End, PageUp/Down, Pause, PrintScreen. Otherwise add Ctrl, Alt, Shift or Win."
+    },
+    "editCombo": "Click to change the combination"
   }
 }

@@ -705,7 +705,9 @@
     "record": {
       "title": "Grabar una combinacion personalizada",
       "hint": "Pulsa las teclas que quieras usar. Necesitas al menos un modificador y una tecla final (ej. Ctrl + Alt + R, F13, Win + Espacio). Esc cancela.",
-      "waiting": "Pulsa tu combinacion..."
-    }
+      "waiting": "Pulsa tu combinacion...",
+      "needsModifier": "Una tecla sola solo se admite para F1-F24, Insert, Delete, Home, End, PageUp/Down, Pause, PrintScreen. Si no, agrega Ctrl, Alt, Shift o Win."
+    },
+    "editCombo": "Clic para cambiar la combinacion"
   }
 }

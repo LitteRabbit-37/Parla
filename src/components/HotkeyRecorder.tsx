@@ -14,14 +14,36 @@ import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { HotkeyTrigger } from "@/lib/tauri";
+import { cn } from "@/lib/utils";
 
+// VK codes des modifiers. On inclut a la fois les codes "generiques" Windows
+// (0x10/0x11/0x12) que WebView2 renvoie via e.keyCode, et les variantes L/R
+// (0xa0..0xa5) au cas ou un browser les emettrait. Sans 0x10/0x11/0x12, le
+// recorder enregistrait "Ctrl + Ctrl" / "Shift + Shift" / "Alt + Alt" car
+// la touche modifier elle-meme passait pour une touche finale.
 const MODIFIER_VKS = new Set([
-  0xa0, 0xa1, // Shift L/R
-  0xa2, 0xa3, // Ctrl L/R
-  0xa4, 0xa5, // Alt L/R
+  0x10, 0xa0, 0xa1, // Shift (generic + L/R)
+  0x11, 0xa2, 0xa3, // Ctrl (generic + L/R)
+  0x12, 0xa4, 0xa5, // Alt (generic + L/R)
   0x5b, 0x5c, // Win L/R
   0x14, // CapsLock
   0x90, 0x91, // NumLock, ScrollLock
+]);
+
+// Touches autorisees comme combo "sans modifier". Sans cette whitelist,
+// l'utilisateur pourrait enregistrer "F" seul, qui se declencherait alors
+// chaque fois qu'il tape F dans n'importe quel champ texte. On limite aux
+// touches non-textuelles : F1-F24, Pause, PrintScreen, Insert, Delete,
+// Home, End, PageUp/Down.
+const STANDALONE_VKS = new Set<number>([
+  0x13, // Pause
+  0x21, 0x22, // PageUp, PageDown
+  0x23, 0x24, // End, Home
+  0x2c, 0x2d, 0x2e, // PrintScreen, Insert, Delete
+  // F1..F24
+  0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77,
+  0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f,
+  0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87,
 ]);
 
 type Captured = {
@@ -44,12 +66,14 @@ export function HotkeyRecorder({
 }) {
   const { t } = useTranslation();
   const [captured, setCaptured] = useState<Captured | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const finishedRef = useRef(false);
 
   // Reset l'etat a chaque ouverture.
   useEffect(() => {
     if (open) {
       setCaptured(null);
+      setError(null);
       finishedRef.current = false;
     }
   }, [open]);
@@ -77,6 +101,18 @@ export function HotkeyRecorder({
       if (MODIFIER_VKS.has(vk)) return;
 
       if (finishedRef.current) return;
+
+      const hasModifier = e.ctrlKey || e.altKey || e.shiftKey || e.metaKey;
+      // Refuse une touche textuelle (lettre/chiffre/espace) sans modifier :
+      // sinon le recorder se declenche a chaque frappe normale dans tout
+      // editeur. Les F-keys et touches systeme (Insert, Delete, ...) sont
+      // OK seules car elles ne produisent pas de texte.
+      if (!hasModifier && !STANDALONE_VKS.has(vk)) {
+        setError(t("hotkey.record.needsModifier"));
+        return;
+      }
+
+      setError(null);
       finishedRef.current = true;
 
       const trigger: Extract<HotkeyTrigger, { kind: "combo" }> = {
@@ -100,7 +136,7 @@ export function HotkeyRecorder({
     return () => {
       document.removeEventListener("keydown", onKey, { capture: true });
     };
-  }, [open, onCancel, onCapture]);
+  }, [open, onCancel, onCapture, t]);
 
   if (!open) return null;
 
@@ -129,9 +165,16 @@ export function HotkeyRecorder({
           {t("hotkey.record.hint")}
         </p>
 
-        <div className="mt-6 flex h-16 items-center justify-center rounded-md border-2 border-dashed bg-muted/30">
+        <div
+          className={cn(
+            "mt-6 flex h-16 items-center justify-center rounded-md border-2 border-dashed bg-muted/30",
+            error && "border-destructive/60 bg-destructive/5",
+          )}
+        >
           {captured ? (
             <span className="font-mono text-base">{captured.label}</span>
+          ) : error ? (
+            <span className="px-3 text-center text-xs text-destructive">{error}</span>
           ) : (
             <span className="text-sm text-muted-foreground">
               {t("hotkey.record.waiting")}
