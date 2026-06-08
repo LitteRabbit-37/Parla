@@ -256,7 +256,11 @@ export type RetentionSettings = {
   audio_retention_days: number;
 };
 
-export type MetricsPeriod = "last_7_days" | "last_30_days" | "this_year" | "all_time";
+// Aligne sur le snake_case de heck que serde utilise cote Rust : Last7Days
+// devient last7_days (pas last_7_days), car heck ne separe pas les chiffres
+// adjacents aux lettres. Tester avec ces valeurs exactes ou la deserialisation
+// du MetricsPeriod enum echoue avec "unknown variant".
+export type MetricsPeriod = "last7_days" | "last30_days" | "this_year" | "all_time";
 
 export type TranscriptionModelMetric = {
   name: string;

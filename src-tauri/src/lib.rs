@@ -173,9 +173,14 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_store::Builder::new().build())
+        // Argument `--minimized` ecrit dans l'entree Run du registry Windows
+        // par le plugin quand l'utilisateur active l'autostart. Le setup ci-
+        // dessous detecte cet argument pour demarrer Parla en tray-only (hook
+        // clavier actif, fenetre cachee) plutot que d'afficher la fenetre
+        // principale a chaque demarrage de Windows.
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
+            Some(vec!["--minimized"]),
         ))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(move |app| {
@@ -207,6 +212,48 @@ pub fn run() {
             if let Some(main) = app.get_webview_window("main") {
                 if let Ok(hwnd) = main.hwnd() {
                     window_subclass::install_main_window_subclass(hwnd.0 as isize);
+                }
+            }
+            // La main window est creee avec `visible: false` dans tauri.conf.json
+            // pour eviter le flash blanc au boot autostart. On l'affiche ici
+            // sauf si l'autostart a passe `--minimized` : dans ce cas Parla
+            // reste en tray-only et l'utilisateur cliquera sur l'icone tray
+            // ou le menu "Open Parla" pour faire apparaitre la fenetre.
+            let started_minimized = std::env::args().any(|arg| arg == "--minimized");
+            if !started_minimized {
+                if let Some(main) = app.get_webview_window("main") {
+                    let _ = main.show();
+                    let _ = main.set_focus();
+                }
+            }
+            // Migration 0.3.2 : avant cette version, l'entree autostart du
+            // registry Windows ne contenait pas l'argument `--minimized`.
+            // Les utilisateurs qui avaient deja active l'autostart en 0.3.1
+            // continueraient donc a voir la fenetre s'ouvrir au demarrage,
+            // meme apres l'update. On re-ecrit l'entree une seule fois
+            // (disable + enable) pour qu'elle inclue le flag.
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                use tauri_plugin_store::StoreExt;
+                const MIGRATION_KEY: &str = "autostart_v032_migrated";
+                if let Ok(store) = app.store("parla.settings.json") {
+                    let already_done = store
+                        .get(MIGRATION_KEY)
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    if !already_done {
+                        let mgr = app.autolaunch();
+                        if matches!(mgr.is_enabled(), Ok(true)) {
+                            let _ = mgr.disable();
+                            if let Err(e) = mgr.enable() {
+                                warn!("Re-write autostart entry failed: {e}");
+                            } else {
+                                info!("Autostart entry refreshed with --minimized flag");
+                            }
+                        }
+                        store.set(MIGRATION_KEY, serde_json::Value::Bool(true));
+                        let _ = store.save();
+                    }
                 }
             }
             setup_hotkeys(handle);

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-06-08
+
+Bug-fix release: Dashboard error on "Last 7 days" / "Last 30 days" filters
+(issue #4) and autostart now leaves Parla in the tray instead of opening
+the main window.
+
+### Fixed
+- Dashboard "Model performance" now works for the "Last 7 days" and "Last 30 days" filters. The frontend was sending `last_7_days` / `last_30_days` while the Rust `MetricsPeriod` enum, serialized with `rename_all = "snake_case"`, expects `last7_days` / `last30_days` (heck's snake_case does not insert an underscore between a letter and an adjacent digit). Frontend variant strings aligned on the serde output. `this_year` and `all_time` were unaffected.
+- Autostart at Windows logon now starts Parla in tray-only mode (keyboard hook active, main window hidden) instead of popping the main window on every boot. The autostart plugin registers the Run entry with a `--minimized` flag, the main window is created hidden in `tauri.conf.json`, and the setup hook shows it on demand when the flag is absent (manual launch). A one-shot migration on first 0.3.2 boot re-writes the Run registry entry for users who had autostart enabled in 0.3.0/0.3.1, so they get the new behavior at the next Windows logon without having to toggle autostart manually.
+
 ## [0.3.1] - 2026-05-13
 
 Bug-fix release for the custom recording shortcut (issue #3).

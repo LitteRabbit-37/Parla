@@ -34,7 +34,7 @@ function formatDurationShort(seconds: number): string {
 
 export function ModelPerformancePanel() {
   const { t } = useTranslation();
-  const [period, setPeriod] = useState<MetricsPeriod>("last_7_days");
+  const [period, setPeriod] = useState<MetricsPeriod>("last7_days");
   const [data, setData] = useState<ModelPerformanceMetrics | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,10 +83,10 @@ export function ModelPerformancePanel() {
             onChange={(e) => setPeriod(e.target.value as MetricsPeriod)}
             className="h-8 shrink-0 rounded-md border border-input bg-background px-2 text-sm shadow-sm"
           >
-            <option value="last_7_days">
+            <option value="last7_days">
               {t("modelPerformance.period.last7Days")}
             </option>
-            <option value="last_30_days">
+            <option value="last30_days">
               {t("modelPerformance.period.last30Days")}
             </option>
             <option value="this_year">
