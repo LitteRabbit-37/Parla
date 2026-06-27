@@ -39,10 +39,11 @@ use commands::recording::{
 use commands::streaming::{StreamingRegistryState, StreamingSessionState};
 use commands::settings::{
     close_to_tray_enabled, get_audio_resumption_delay, get_close_to_tray,
-    get_dictation_language, get_selected_whisper_model, get_system_mute_enabled,
-    get_text_processing_settings, get_transcription_source, set_append_trailing_space,
-    set_audio_resumption_delay, set_close_to_tray, set_dictation_language, set_filler_words,
-    set_remove_filler_words, set_restore_clipboard_after_paste, set_selected_whisper_model,
+    get_dictation_language, get_selected_whisper_model, get_sound_feedback_enabled,
+    get_system_mute_enabled, get_text_processing_settings, get_transcription_source,
+    set_append_trailing_space, set_audio_resumption_delay, set_close_to_tray,
+    set_dictation_language, set_filler_words, set_remove_filler_words,
+    set_restore_clipboard_after_paste, set_selected_whisper_model, set_sound_feedback_enabled,
     set_system_mute_enabled, set_text_formatting_enabled, set_transcription_kind,
     set_transcription_source,
 };
@@ -308,6 +309,8 @@ pub fn run() {
             set_system_mute_enabled,
             get_audio_resumption_delay,
             set_audio_resumption_delay,
+            get_sound_feedback_enabled,
+            set_sound_feedback_enabled,
             mini_recorder::resize_recorder_window,
             mini_recorder::show_main_window,
             list_word_replacements,

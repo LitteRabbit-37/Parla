@@ -259,3 +259,15 @@ pub fn get_audio_resumption_delay(app: AppHandle) -> f64 {
 pub fn set_audio_resumption_delay(app: AppHandle, secs: f64) -> Result<(), String> {
     crate::audio::mute::set_resumption_delay(&app, secs).map_err(|e| e.to_string())
 }
+
+// -- Sound feedback cues (VoiceInk SoundManager) ----------------------------
+
+#[tauri::command]
+pub fn get_sound_feedback_enabled(app: AppHandle) -> bool {
+    crate::audio::feedback::is_enabled(&app)
+}
+
+#[tauri::command]
+pub fn set_sound_feedback_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
+    crate::audio::feedback::set_enabled(&app, enabled).map_err(|e| e.to_string())
+}

@@ -1,6 +1,6 @@
 [package]
 name = "parla"
-version = "0.3.2"
+version = "0.4.0"
 description = "Parla - dictee vocale locale et cloud pour Windows"
 authors = ["Parla contributors"]
 edition = "2021"
@@ -38,6 +38,9 @@ cpal = "0.15"
 hound = "3.5"
 rubato = "0.16"
 ringbuf = "0.4"
+# Lecture des sons de feedback (start / stop / cancel). rodio 0.20 partage
+# le meme cpal 0.15 que la capture, donc pas de doublon dans l'arbre.
+rodio = "0.20"
 uuid = { version = "1", features = ["v4"] }
 arboard = "3"
 

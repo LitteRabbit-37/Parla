@@ -82,43 +82,67 @@ pub fn set_resumption_delay(app: &AppHandle, secs: f64) -> Result<()> {
     store.save().map_err(|e| anyhow!("store save: {e}"))
 }
 
+/// Delay before the mute actually engages after recording starts (VoiceInk's
+/// `scheduleSystemMute` idea). Kept short so the mute feels responsive : when
+/// system mute is on, only the first ~300ms of the start cue is heard before
+/// the speakers are muted. A tap-then-stop shorter than this never mutes.
+const ENGAGE_DELAY: Duration = Duration::from_millis(300);
+
 /// Engage system mute if the feature is enabled. Called on record start.
+/// The actual mute is deferred by ENGAGE_DELAY and cancelled if a release()
+/// (or a new engage()) bumps the generation while we wait.
 pub fn engage(app: &AppHandle) {
     if !is_enabled(app) {
         return;
     }
-    let currently_muted = match is_muted() {
-        Ok(v) => v,
-        Err(e) => {
-            warn!(error = %e, "mute: cannot read current state, skipping");
-            return;
-        }
+    let my_generation = {
+        let mut s = state().lock();
+        s.generation = s.generation.wrapping_add(1);
+        s.generation
     };
 
-    let mut s = state().lock();
-    s.generation = s.generation.wrapping_add(1);
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(ENGAGE_DELAY).await;
 
-    if currently_muted {
-        // Already muted. If we are the ones who muted it, keep the flag
-        // so the next release un-mutes. Otherwise respect the user's
-        // own mute : do NOT unmute when we release.
-        if s.did_mute {
-            s.was_muted_before = false;
-        } else {
-            s.was_muted_before = true;
-            s.did_mute = false;
-        }
-        return;
-    }
+        // Current mute state (COM read, no lock held).
+        let currently_muted = match is_muted() {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(error = %e, "mute: cannot read current state, skipping");
+                return;
+            }
+        };
 
-    s.was_muted_before = false;
-    match set_muted(true) {
-        Ok(()) => {
-            s.did_mute = true;
-            debug!("system audio muted for recording");
+        // Decide + act under a single lock so a concurrent release() can't be
+        // overridden (which would leak a mute that never gets restored).
+        let mut s = state().lock();
+        if s.generation != my_generation {
+            // Recording stopped (or restarted) during the delay - drop it.
+            return;
         }
-        Err(e) => warn!(error = %e, "mute: set_muted(true) failed"),
-    }
+
+        if currently_muted {
+            // Already muted. If we are the ones who muted it, keep the flag
+            // so the next release un-mutes. Otherwise respect the user's
+            // own mute : do NOT unmute when we release.
+            if s.did_mute {
+                s.was_muted_before = false;
+            } else {
+                s.was_muted_before = true;
+                s.did_mute = false;
+            }
+            return;
+        }
+
+        s.was_muted_before = false;
+        match set_muted(true) {
+            Ok(()) => {
+                s.did_mute = true;
+                debug!("system audio muted for recording");
+            }
+            Err(e) => warn!(error = %e, "mute: set_muted(true) failed"),
+        }
+    });
 }
 
 /// Release system mute after the configured delay. Called on record stop
@@ -131,7 +155,10 @@ pub fn release(app: &AppHandle) {
     }
     let delay = resumption_delay(app);
     let (should_unmute, my_generation) = {
-        let s = state().lock();
+        let mut s = state().lock();
+        // Bump the generation so a deferred engage() still waiting out its
+        // ENGAGE_DELAY sees a mismatch and aborts : the recording is over.
+        s.generation = s.generation.wrapping_add(1);
         (s.did_mute && !s.was_muted_before, s.generation)
     };
 

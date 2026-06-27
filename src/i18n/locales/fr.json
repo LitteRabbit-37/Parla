@@ -154,6 +154,8 @@
     "closeToTrayDescription": "Quand vous cliquez sur X de la fenetre principale, Parla continue de tourner en arriere-plan (zone de notification). Clic droit sur l'icone tray puis 'Quit Parla' pour fermer completement.",
     "recording": "Enregistrement",
     "recordingDescription": "Comportement audio pendant la dictee.",
+    "soundFeedback": "Retour sonore",
+    "soundFeedbackDescription": "Joue un court son au demarrage, a l'arret et a l'annulation de l'enregistrement, pour entendre l'etat sans regarder l'ecran.",
     "systemMute": "Couper le son systeme pendant l'enregistrement",
     "systemMuteDescription": "Silencie les haut-parleurs / casque quand vous lancez un enregistrement pour que les notifications et videos ne polluent pas la transcription. L'etat de mute precedent est restaure a l'arret.",
     "resumeDelay": "Delai de restauration",

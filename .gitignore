@@ -57,3 +57,9 @@ coverage/
 *.mp3
 *.flac
 *.ogg
+
+# ...except the bundled recording-feedback cues, which ship with the app
+# (embedded via include_bytes! in src-tauri/src/audio/feedback.rs).
+!src-tauri/sounds/
+!src-tauri/sounds/*.wav
+!src-tauri/sounds/*.mp3

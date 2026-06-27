@@ -19,6 +19,7 @@ use crate::enhancement::prompt_detection;
 use crate::enhancement::prompts as prompt_store;
 use crate::enhancement::service as llm_service;
 use crate::mini_recorder;
+use crate::audio::feedback::{self, Cue};
 use crate::paste::paste_at_cursor;
 use crate::services::api_keys;
 use crate::text_processing::{
@@ -811,6 +812,12 @@ async fn finalize_text(app: &AppHandle, text: String, duration_ms: u64) -> Resul
     task::spawn_blocking(move || paste_at_cursor(&final_text_clone, restore, None))
         .await
         .map_err(|e| anyhow!("task join: {e}"))??;
+
+    // Stop cue, played once the text is actually inserted at the cursor
+    // (VoiceInk SoundManager.playStopSound at TranscriptionPipeline.swift:209).
+    // Only reached for non-empty transcriptions (empty text returns earlier),
+    // so the cue doubles as a "text inserted" confirmation.
+    feedback::play(app, Cue::Stop);
 
     let _ = app.emit(
         "pipeline:state",

@@ -154,6 +154,8 @@
     "closeToTrayDescription": "When you click the X on the main window, Parla keeps running in the background (system tray). Right-click the tray icon and pick 'Quit Parla' to fully exit.",
     "recording": "Recording",
     "recordingDescription": "Audio behavior while you are dictating.",
+    "soundFeedback": "Sound feedback",
+    "soundFeedbackDescription": "Plays a short cue when recording starts, stops and is cancelled, so you can hear the recording state without watching the screen.",
     "systemMute": "Mute system audio during recording",
     "systemMuteDescription": "Silences speakers / headphones when you start recording so notifications and videos don't leak into the transcript. The original mute state is restored when you stop.",
     "resumeDelay": "Restore delay",

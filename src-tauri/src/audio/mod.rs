@@ -7,6 +7,7 @@
 // - Metering RMS/peak en dB pour l'UI (60 Hz cote VoiceInk, 30 Hz ici est suffisant)
 
 pub mod device;
+pub mod feedback;
 pub mod meters;
 pub mod mute;
 pub mod recorder;

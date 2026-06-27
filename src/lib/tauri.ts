@@ -347,6 +347,9 @@ export const api = {
   getAudioResumptionDelay: () => invoke<number>("get_audio_resumption_delay"),
   setAudioResumptionDelay: (secs: number) =>
     invoke<void>("set_audio_resumption_delay", { secs }),
+  getSoundFeedbackEnabled: () => invoke<boolean>("get_sound_feedback_enabled"),
+  setSoundFeedbackEnabled: (enabled: boolean) =>
+    invoke<void>("set_sound_feedback_enabled", { enabled }),
   resizeRecorderWindow: (height: number) =>
     invoke<void>("resize_recorder_window", { height }),
   showMainWindow: (panel?: string | null) =>

@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::audio::feedback::{self, Cue};
 use crate::audio::{
     list_input_devices, recorder::ChunkCallback, AudioDeviceInfo, AudioMeter, AudioRecorder,
     RecorderConfig, RecorderHandle,
@@ -110,6 +111,12 @@ pub fn start_recording_core_with_chunk(
         anyhow::bail!("un enregistrement est deja en cours");
     }
 
+    // Start cue, played before the microphone capture begins so it never
+    // leaks into the recording (VoiceInk SoundManager.playStartSound). On the
+    // hotkey path the system mute is deferred ~250ms (audio/mute.rs) so the
+    // speakers are still audible here. Fire-and-forget, no-op if disabled.
+    feedback::play(app, Cue::Start);
+
     let dir = recordings_dir(app)?;
     let id = Uuid::new_v4().to_string();
     let wav_path = dir.join(format!("{id}.wav"));
@@ -144,6 +151,10 @@ pub fn stop_recording_core(
     drop(guard);
     let path = handle.stop()?;
     info!(path = %path.display(), "Enregistrement termine");
+    // The stop cue is NOT played here. Like VoiceInk (playStopSound at the
+    // paste site), it fires at the end of the pipeline once the text is
+    // inserted at the cursor - see transcription/pipeline.rs finalize_text.
+    // That also avoids the system-mute resumption-delay clipping the cue.
     let stopped = RecordingStopped {
         wav_path: path.to_string_lossy().into_owned(),
     };
@@ -165,6 +176,9 @@ pub fn cancel_recording_core(
         warn!("Impossible de supprimer l'enregistrement annule {}: {e}", path.display());
     }
     info!(path = %path.display(), "Enregistrement annule");
+    // Cancel / ESC cue (VoiceInk SoundManager.playEscSound). Only when there
+    // was an active recording to cancel (early return above otherwise).
+    feedback::play(app, Cue::Cancel);
     let _ = app.emit("recording:cancelled", ());
     Ok(())
 }

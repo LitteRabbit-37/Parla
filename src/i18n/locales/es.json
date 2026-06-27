@@ -154,6 +154,8 @@
     "closeToTrayDescription": "Cuando hace clic en la X de la ventana principal, Parla sigue ejecutandose en segundo plano (bandeja del sistema). Clic derecho sobre el icono de la bandeja y 'Quit Parla' para salir completamente.",
     "recording": "Grabacion",
     "recordingDescription": "Comportamiento del audio durante el dictado.",
+    "soundFeedback": "Senal sonora",
+    "soundFeedbackDescription": "Reproduce un sonido breve al iniciar, detener y cancelar la grabacion, para conocer el estado sin mirar la pantalla.",
     "systemMute": "Silenciar audio del sistema durante la grabacion",
     "systemMuteDescription": "Silencia altavoces / auriculares al iniciar una grabacion para que las notificaciones y videos no contaminen la transcripcion. El estado de silencio previo se restaura al detener.",
     "resumeDelay": "Retraso de restauracion",

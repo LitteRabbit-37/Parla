@@ -32,6 +32,7 @@ export function SettingsPanel() {
   const [closeToTray, setCloseToTray] = useState(true);
   const [systemMute, setSystemMute] = useState(false);
   const [resumeDelay, setResumeDelay] = useState(0.2);
+  const [soundFeedback, setSoundFeedback] = useState(true);
 
   useEffect(() => {
     api
@@ -45,6 +46,7 @@ export function SettingsPanel() {
     api.getCloseToTray().then(setCloseToTray).catch(console.error);
     api.getSystemMuteEnabled().then(setSystemMute).catch(console.error);
     api.getAudioResumptionDelay().then(setResumeDelay).catch(console.error);
+    api.getSoundFeedbackEnabled().then(setSoundFeedback).catch(console.error);
   }, []);
 
   async function changeStyle(next: "mini" | "notch") {
@@ -87,6 +89,16 @@ export function SettingsPanel() {
     } catch (e) {
       console.error(e);
       setSystemMute(!next);
+    }
+  }
+
+  async function toggleSoundFeedback(next: boolean) {
+    setSoundFeedback(next);
+    try {
+      await api.setSoundFeedbackEnabled(next);
+    } catch (e) {
+      console.error(e);
+      setSoundFeedback(!next);
     }
   }
 
@@ -179,6 +191,23 @@ export function SettingsPanel() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          <label className="flex items-center justify-between rounded-md border p-3">
+            <div>
+              <p className="text-sm font-medium">
+                {t("settings.soundFeedback")}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {t("settings.soundFeedbackDescription")}
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={soundFeedback}
+              onChange={(e) => toggleSoundFeedback(e.target.checked)}
+              className="h-5 w-5"
+            />
+          </label>
+
           <label className="flex items-center justify-between rounded-md border p-3">
             <div>
               <p className="text-sm font-medium">

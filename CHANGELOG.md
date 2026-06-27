@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-27
+
+Feature release: optional audio cues so the recording state is audible
+without watching the screen (issue #5).
+
+### Added
+- Sound feedback cues on recording start, paste and cancel (issue #5), mirroring VoiceInk `SoundManager.swift`. Three short cues reused from VoiceInk (`recstart` / `recstop` / `esc`) are embedded in the binary and played via `rodio` on the cpal output device at reduced volume (0.4 / 0.4 / 0.3). A new "Sound feedback" toggle in the Recording settings card (`sound_feedback_enabled`, on by default) gates them, persisted like the other recording settings and translated in en/fr/es. The start cue plays before microphone capture begins so it never leaks into the recording; the stop cue fires at the paste site in the pipeline (like VoiceInk it doubles as a "text inserted" confirmation, and is therefore skipped for empty transcriptions); the esc cue plays on cancel. To keep the start cue audible when "Mute system audio during recording" is enabled, the system mute now engages 300 ms after start (deferred and cancellable, so a tap-then-stop shorter than that never mutes).
+
 ## [0.3.2] - 2026-06-08
 
 Bug-fix release: Dashboard error on "Last 7 days" / "Last 30 days" filters
