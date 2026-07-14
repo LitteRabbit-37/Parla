@@ -271,47 +271,46 @@
     "cloudDescription": "Proveedores en la nube para una transcripcion rapida. Requiere clave API.",
     "parakeetDescription": "NVIDIA Parakeet TDT via ONNX Runtime. Rapido y multilingue."
   },
-  "transcriptionSource": {
-    "title": "Fuente de transcripcion",
-    "description": "Elija entre Whisper local, Parakeet NVIDIA o un proveedor en la nube. Al pulsar una tarjeta se muestran los modelos de esa fuente. El pipeline sigue usando la fuente activa (tarjeta con 'activo') hasta que active un nuevo modelo.",
-    "whisperLocalLabel": "Whisper local",
-    "whisperLocalDescription": "Offline, modelos ggml de Whisper.",
-    "parakeetLabel": "Parakeet (NVIDIA)",
-    "parakeetDescription": "Offline, ONNX Runtime + CUDA/DirectML.",
-    "cloudLabel": "Proveedor en la nube",
-    "cloudDescription": "Requiere una clave API.",
-    "active": "activo"
-  },
   "dictationLanguage": {
     "title": "Idioma de dictado",
     "description": "Idioma usado por el modelo activo ({{model}}). Selecciona 'Auto-deteccion' para que el modelo lo identifique en cada grabacion.",
     "auto": "Auto-deteccion"
   },
-  "models": {
-    "title": "Modelos IA",
-    "description": "Elija la fuente de transcripcion por defecto. Los perfiles Power Mode pueden sobrescribirla por app.",
-    "whisperLocal": "Whisper (local)",
-    "parakeet": "Parakeet (local)",
-    "cloudProviders": "Proveedores cloud",
-    "downloadModel": "Descargar",
-    "deleteModel": "Eliminar",
-    "importModel": "Importar .bin",
-    "cancelDownload": "Cancelar descarga"
+  "aiModels": {
+    "defaultModel": "Modelo predeterminado",
+    "noModelSelected": "Ningun modelo seleccionado",
+    "setAsDefault": "Establecer por defecto",
+    "configure": "Configurar",
+    "getApiKey": "Obtener clave API",
+    "removeApiKey": "Eliminar la clave API",
+    "filter": {
+      "recommended": "Recomendados",
+      "local": "Local",
+      "cloud": "Nube"
+    },
+    "cloud": {
+      "apiKeyConfig": "Configuracion de la clave API",
+      "apiKeyPlaceholder": "Introduce tu clave API de {{provider}}",
+      "verify": "Verificar",
+      "verifying": "Verificando...",
+      "verifySuccess": "Clave API verificada!",
+      "verifyFailed": "Error de verificacion",
+      "streaming": "streaming"
+    },
+    "import": {
+      "title": "Importar modelo local",
+      "description": "Anade un modelo whisper personalizado (archivo .bin GGML)",
+      "browse": "Explorar",
+      "infoTip": "Anade un modelo whisper personalizado para usar con Parla. Selecciona el archivo .bin descargado.",
+      "error": "Importacion: {{message}}"
+    }
   },
   "whisperModels": {
-    "title": "Modelos Whisper",
-    "description": "Transcripcion local via whisper.cpp. Modelos descargados desde huggingface.co/ggerganov/whisper.cpp (mismas versiones que VoiceInk).",
-    "importTitle": "Importar un modelo personalizado",
-    "importDescription": "Anade un archivo .bin GGML local (fine-tune, cuantizacion propia, etc.)",
-    "browse": "Examinar",
-    "importError": "Importar: {{message}}",
     "englishOnly": "EN",
     "importedBadge": "importado",
     "installedBadge": "instalado",
     "approxSize": "Tamano aprox. {{size}}",
     "onDisk": "en disco {{size}}",
-    "selected": "Seleccionado",
-    "select": "Seleccionar",
     "delete": "Eliminar",
     "download": "Descargar",
     "cancel": "Cancelar",
@@ -320,14 +319,10 @@
     "dialogFilter": "Modelo Whisper GGML"
   },
   "parakeet": {
-    "title": "Parakeet (NVIDIA NeMo)",
-    "description": "Transcripcion local via los modelos Parakeet TDT 0.6B. Ejecutado por ONNX Runtime. Alternativa rapida a Whisper large cuando hay GPU NVIDIA disponible.",
     "executionProvider": "Execution provider:",
     "cpuHint": "Activa la caracteristica Cargo cuda-onnx (NVIDIA) o directml-onnx (GPU Windows) para aceleracion.",
     "multilingual": "multilingue",
     "englishOnly": "ingles",
-    "active": "activo",
-    "activate": "Activar",
     "download": "Descargar",
     "cancel": "Cancelar",
     "downloading": "descargando...",
@@ -361,24 +356,6 @@
     "cancelled": "Cancelado",
     "errorPrefix": "Error: {{message}}",
     "confirmDelete": "Eliminar el modelo {{id}} ?"
-  },
-  "cloud": {
-    "keysTitle": "1. Claves API de proveedores",
-    "keysDescription": "Configure al menos una clave para desbloquear los modelos cloud abajo. Las claves se guardan en el Administrador de credenciales de Windows.",
-    "modelsTitle": "2. Modelos cloud disponibles",
-    "modelsDescription": "Pulse sobre un modelo para seleccionarlo como fuente de transcripcion. Los modelos cuya clave API no este configurada estan desactivados.",
-    "configured": "configurado",
-    "getKey": "Obtener una clave",
-    "apiKeyPlaceholder": "Clave API",
-    "apiKeySavedPlaceholder": "(clave ya guardada)",
-    "verifyAndSave": "Verificar y guardar",
-    "verifying": "verificando...",
-    "keySaved": "OK, clave guardada",
-    "keyDeleted": "Clave eliminada",
-    "errorPrefix": "Error: {{message}}",
-    "streaming": "streaming",
-    "apiKeyRequired": "clave API requerida",
-    "selected": "seleccionado"
   },
   "enhancement": {
     "title": "Mejora LLM",

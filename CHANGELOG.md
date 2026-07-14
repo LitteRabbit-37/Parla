@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- AI Models page redesigned to match VoiceInk `ModelManagementView`, fixing the confusing cloud-provider flow (issue #6). The three source tiles (Local / Parakeet / Cloud) are replaced by a "Default Model" header showing the active model, a Recommended / Local / Cloud pill filter (purely visual), and a unified list of model cards. Each card exposes a three-state action button mirroring VoiceInk `CloudModelCardView`: "Configure" (cloud API key entered inline) becomes "Set as Default" once the key is verified, then "Default Model" once active. Verifying a cloud key now only stores the key; the provider is applied only when the user explicitly clicks "Set as Default", so nothing silently falls back to Local and the active model stays named in the header and highlighted in the list. Whisper and Parakeet models share the Local filter and the `.bin` import moves to a card at the end of that list. No backend change: Whisper activation composes the existing `set_selected_whisper_model` + `set_transcription_kind` commands. The old `CloudProvidersPanel`, `ModelsPanel`, `ParakeetPanel` and `TranscriptionSourcePanel` are removed.
+
 ## [0.4.0] - 2026-06-27
 
 Feature release: optional audio cues so the recording state is audible

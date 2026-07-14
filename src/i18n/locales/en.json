@@ -271,47 +271,46 @@
     "cloudDescription": "Cloud providers for fast transcription. Requires API key.",
     "parakeetDescription": "NVIDIA Parakeet TDT via ONNX Runtime. Fast and multilingual."
   },
-  "transcriptionSource": {
-    "title": "Transcription source",
-    "description": "Pick between local Whisper, NVIDIA Parakeet or a cloud provider. Clicking a tile shows the models for that source. The pipeline keeps using the active source (tile with 'active') until you activate a new model.",
-    "whisperLocalLabel": "Local Whisper",
-    "whisperLocalDescription": "Offline, Whisper ggml models.",
-    "parakeetLabel": "Parakeet (NVIDIA)",
-    "parakeetDescription": "Offline, ONNX Runtime + CUDA/DirectML.",
-    "cloudLabel": "Cloud provider",
-    "cloudDescription": "Requires an API key.",
-    "active": "active"
-  },
   "dictationLanguage": {
     "title": "Dictation language",
     "description": "Language used by the active model ({{model}}). Switch to 'Auto-detect' to let the model identify the language at recording time.",
     "auto": "Auto-detect"
   },
-  "models": {
-    "title": "AI Models",
-    "description": "Pick the transcription source used by default. Power Mode profiles can override this per app.",
-    "whisperLocal": "Whisper (local)",
-    "parakeet": "Parakeet (local)",
-    "cloudProviders": "Cloud providers",
-    "downloadModel": "Download",
-    "deleteModel": "Delete",
-    "importModel": "Import .bin",
-    "cancelDownload": "Cancel download"
+  "aiModels": {
+    "defaultModel": "Default Model",
+    "noModelSelected": "No model selected",
+    "setAsDefault": "Set as Default",
+    "configure": "Configure",
+    "getApiKey": "Get API key",
+    "removeApiKey": "Remove API Key",
+    "filter": {
+      "recommended": "Recommended",
+      "local": "Local",
+      "cloud": "Cloud"
+    },
+    "cloud": {
+      "apiKeyConfig": "API Key Configuration",
+      "apiKeyPlaceholder": "Enter your {{provider}} API key",
+      "verify": "Verify",
+      "verifying": "Verifying...",
+      "verifySuccess": "API key verified successfully!",
+      "verifyFailed": "Verification failed",
+      "streaming": "streaming"
+    },
+    "import": {
+      "title": "Import Local Model",
+      "description": "Add a custom fine-tuned whisper model (.bin GGML file)",
+      "browse": "Browse",
+      "infoTip": "Add a custom fine-tuned whisper model to use with Parla. Select the downloaded .bin file.",
+      "error": "Import: {{message}}"
+    }
   },
   "whisperModels": {
-    "title": "Whisper models",
-    "description": "Local transcription via whisper.cpp. Models are downloaded from huggingface.co/ggerganov/whisper.cpp (same versions as VoiceInk).",
-    "importTitle": "Import a custom model",
-    "importDescription": "Add a local .bin GGML file (fine-tune, custom quantization, etc.)",
-    "browse": "Browse",
-    "importError": "Import: {{message}}",
     "englishOnly": "EN",
     "importedBadge": "imported",
     "installedBadge": "installed",
     "approxSize": "Approx. size {{size}}",
     "onDisk": "on disk {{size}}",
-    "selected": "Selected",
-    "select": "Select",
     "delete": "Delete",
     "download": "Download",
     "cancel": "Cancel",
@@ -320,14 +319,10 @@
     "dialogFilter": "Whisper GGML model"
   },
   "parakeet": {
-    "title": "Parakeet (NVIDIA NeMo)",
-    "description": "Local transcription via Parakeet TDT 0.6B models. Run with ONNX Runtime. Fast alternative to Whisper large when an NVIDIA GPU is available.",
     "executionProvider": "Execution provider:",
     "cpuHint": "Enable the Cargo feature cuda-onnx (NVIDIA) or directml-onnx (Windows GPU) for acceleration.",
     "multilingual": "multilingual",
     "englishOnly": "english",
-    "active": "active",
-    "activate": "Activate",
     "download": "Download",
     "cancel": "Cancel",
     "downloading": "downloading...",
@@ -361,24 +356,6 @@
     "cancelled": "Cancelled",
     "errorPrefix": "Error: {{message}}",
     "confirmDelete": "Delete model {{id}}?"
-  },
-  "cloud": {
-    "keysTitle": "1. Provider API keys",
-    "keysDescription": "Configure at least one key to unlock the cloud models below. Keys are stored in Windows Credential Manager.",
-    "modelsTitle": "2. Available cloud models",
-    "modelsDescription": "Click a model to select it as the transcription source. Models whose API key is not configured are disabled.",
-    "configured": "configured",
-    "getKey": "Get a key",
-    "apiKeyPlaceholder": "API key",
-    "apiKeySavedPlaceholder": "(key already saved)",
-    "verifyAndSave": "Verify and save",
-    "verifying": "verifying...",
-    "keySaved": "OK, key saved",
-    "keyDeleted": "Key deleted",
-    "errorPrefix": "Error: {{message}}",
-    "streaming": "streaming",
-    "apiKeyRequired": "API key required",
-    "selected": "selected"
   },
   "enhancement": {
     "title": "LLM Enhancement",
