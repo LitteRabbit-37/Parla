@@ -1,6 +1,6 @@
 [package]
 name = "parla"
-version = "0.4.0"
+version = "0.4.1"
 description = "Parla - dictee vocale locale et cloud pour Windows"
 authors = ["Parla contributors"]
 edition = "2021"
