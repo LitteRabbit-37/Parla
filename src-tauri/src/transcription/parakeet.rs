@@ -42,7 +42,27 @@ impl ParakeetEngine {
         // Libere l'ancien avant de charger le nouveau.
         *guard = None;
 
-        let engine = ParakeetTDT::from_pretrained(model_dir, None)
+        // Selection de l'execution provider ONNX. parakeet-rs prend un
+        // `Option<ExecutionConfig>` ; `None` retombe sur `ExecutionProvider::Cpu`
+        // (le `#[default]` de l'enum). Il faut donc lui passer explicitement le
+        // provider GPU, sinon compiler avec `cuda-onnx` / `directml-onnx` ne
+        // fait qu'exposer le variant sans jamais l'utiliser (inference CPU).
+        // Chaque provider GPU retombe automatiquement sur CPU s'il echoue a
+        // s'initialiser (parakeet-rs enchaine [GPU, CPU.error_on_failure()]).
+        #[cfg(feature = "cuda-onnx")]
+        let cfg = Some(
+            parakeet_rs::ExecutionConfig::new()
+                .with_execution_provider(parakeet_rs::ExecutionProvider::Cuda),
+        );
+        #[cfg(all(not(feature = "cuda-onnx"), feature = "directml-onnx"))]
+        let cfg = Some(
+            parakeet_rs::ExecutionConfig::new()
+                .with_execution_provider(parakeet_rs::ExecutionProvider::DirectML),
+        );
+        #[cfg(all(not(feature = "cuda-onnx"), not(feature = "directml-onnx")))]
+        let cfg: Option<parakeet_rs::ExecutionConfig> = None;
+
+        let engine = ParakeetTDT::from_pretrained(model_dir, cfg)
             .map_err(|e| anyhow!("parakeet load: {e:?}"))?;
         *guard = Some(Loaded {
             path: model_dir.to_path_buf(),
