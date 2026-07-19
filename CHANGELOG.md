@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-19
+
+Feature release: keyboard shortcuts to switch Power Mode profiles while
+recording (issue #8), plus a fix so the Parakeet GPU build actually runs
+inference on the GPU instead of silently falling back to CPU (issue #9).
+
+### Added
+- Power Mode profile selection shortcuts (issue #8), mirroring VoiceInk `MiniRecorderShortcutManager`. While the mini-recorder is visible, `Alt+1`..`Alt+9` and `Alt+0` select the 1st..10th enabled profile (in stored order) and apply it live. The low-level keyboard hook only arms these shortcuts while recording and only for as many profiles as actually exist, and it swallows the keystroke so the digit is never typed into the focused app. It captures `Alt` alone: `AltGr+digit` (AZERTY, where Ctrl is down) and any Ctrl/Shift/Win combo pass through, and a digit that already matches the user's configured record hotkey is not hijacked. Manual selection preserves the original pre-recording baseline, so the end-of-dictation restore still returns to the settings from before recording, not to the previously applied profile. `Alt+N` hint badges are shown next to each enabled profile in the Power Mode settings list and in the mini-recorder profile popover (en/fr/es).
+
+### Fixed
+- Parakeet GPU builds now actually run inference on the GPU (issue #9). The engine loaded Parakeet with `from_pretrained(dir, None)`, which parakeet-rs resolves to `ExecutionProvider::Cpu` (the enum default), so building with `cuda-onnx` or `directml-onnx` only exposed the provider variant and flipped the cosmetic UI label while inference kept running on CPU. The execution provider is now passed explicitly, gated by feature (Cuda for `cuda-onnx`, DirectML for `directml-onnx`, CPU otherwise), and each GPU provider falls back to CPU automatically if initialization fails.
+
 ## [0.4.1] - 2026-07-14
 
 UX release: the AI Models screen is reworked to match VoiceInk so
