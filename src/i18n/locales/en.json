@@ -488,7 +488,8 @@
     "appsSingular": " app",
     "appsPlural": " apps",
     "urlsSingular": " URL",
-    "urlsPlural": " URLs"
+    "urlsPlural": " URLs",
+    "shortcutHint": "Shortcut: while recording, hold Alt and press this number to switch to this profile"
   },
   "recorder": {
     "title": "Recorder",
@@ -624,7 +625,7 @@
     "powerMode": "Power Mode",
     "noConfigs": "No config defined. Create a profile so Parla automatically switches prompt + LLM + source based on the active app.",
     "openPowerMode": "Open Power Mode",
-    "autoSwitch": "Switches automatically based on the current app."
+    "autoSwitch": "Switches automatically based on the current app. Alt+number picks a profile manually."
   },
   "promptDetection": {
     "triggerDetected": "Trigger word detected: {{word}}",

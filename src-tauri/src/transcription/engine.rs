@@ -30,6 +30,7 @@ use crate::commands::recording::{
     stop_recording_core, RecorderState,
 };
 use crate::commands::streaming::StreamingSessionState;
+use crate::hotkeys::keyboard_hook;
 use crate::hotkeys::manager::{HotkeyAction, HotkeyManager};
 use crate::mini_recorder;
 use crate::paste;
@@ -48,6 +49,15 @@ pub fn handle_hotkey_action(app: &AppHandle, manager: &Arc<HotkeyManager>, actio
         HotkeyAction::EnterHandsFree => {
             let _ = app.emit("hotkey:action", "hands-free");
         }
+        HotkeyAction::SelectPowerMode(index) => select_power_mode(app, index),
+    }
+}
+
+/// Applique manuellement le Nieme profil Power Mode active (raccourci
+/// Alt+chiffre pendant l'enregistrement) et notifie l'UI.
+fn select_power_mode(app: &AppHandle, index: usize) {
+    if let Some(session) = power_mode::session::select_by_index(app, index) {
+        let _ = app.emit("power_mode:active", &session);
     }
 }
 
@@ -70,6 +80,11 @@ fn start(app: &AppHandle, manager: &Arc<HotkeyManager>, state: &tauri::State<Rec
     if let Some(session) = power_mode::session::begin_session(app) {
         let _ = app.emit("power_mode:active", &session);
     }
+    // Arme les raccourcis Alt+chiffre de selection Power Mode pour la duree
+    // de l'enregistrement (VoiceInk : shortcuts actifs tant que le recorder
+    // est visible). count = nombre de profils actives adressables ; 0 laisse
+    // les touches Alt+chiffre passer normalement a l'app cible.
+    keyboard_hook::set_power_shortcut_count(power_mode::session::enabled_configs(app).len());
     // Capture + OCR de la fenetre active (background). Remplit
     // le cache consomme par l'enhancement service pour le bloc
     // <CURRENT_WINDOW_CONTEXT>. No-op si la feature est desactivee.
@@ -89,6 +104,8 @@ fn start(app: &AppHandle, manager: &Arc<HotkeyManager>, state: &tauri::State<Rec
         manager.mark_recording_state(true);
     } else if let Err(e) = start_recording_core(app, state, None) {
         warn!("start_recording via hotkey: {e}");
+        // L'enregistrement n'a pas demarre : desarme les raccourcis Power Mode.
+        keyboard_hook::set_power_shortcut_count(0);
         manager.mark_recording_state(false);
         mini_recorder::close(app);
     } else {
@@ -121,6 +138,8 @@ fn stop(app: &AppHandle, manager: &Arc<HotkeyManager>, state: &tauri::State<Reco
         }
         Err(e) => warn!("stop_recording via hotkey: {e}"),
     }
+    // Fin d'enregistrement : desarme les raccourcis Alt+chiffre Power Mode.
+    keyboard_hook::set_power_shortcut_count(0);
     manager.mark_recording_state(false);
 }
 
@@ -136,6 +155,8 @@ fn cancel(app: &AppHandle, manager: &Arc<HotkeyManager>, state: &tauri::State<Re
     }
     power_mode::session::end_session(app);
     let _ = app.emit("power_mode:active", serde_json::Value::Null);
+    // Annulation : desarme les raccourcis Alt+chiffre Power Mode.
+    keyboard_hook::set_power_shortcut_count(0);
     manager.mark_recording_state(false);
     mini_recorder::close(app);
 }

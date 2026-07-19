@@ -25,7 +25,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { cn } from "@/lib/utils";
+import { cn, powerShortcutLabel } from "@/lib/utils";
 import {
   api,
   type CustomPrompt,
@@ -199,7 +199,15 @@ export function PowerModePanel() {
         )}
 
         <ul className="grid gap-1.5">
-            {configs.map((c) => (
+            {configs.map((c) => {
+              // Index parmi les profils actives, dans l'ordre stocke : c'est
+              // ce que le raccourci Alt+chiffre cible (cote backend :
+              // session::enabled_configs). -1 si desactive.
+              const enabledIdx = c.is_enabled
+                ? configs.filter((x) => x.is_enabled).indexOf(c)
+                : -1;
+              const shortcut = powerShortcutLabel(enabledIdx);
+              return (
               <li
                 key={c.id}
                 className={cn(
@@ -229,7 +237,15 @@ export function PowerModePanel() {
                     </p>
                   </div>
                 </div>
-                <div className="flex shrink-0 gap-1">
+                <div className="flex shrink-0 items-center gap-1">
+                  {shortcut && (
+                    <kbd
+                      className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground"
+                      title={t("powerMode.shortcutHint")}
+                    >
+                      {shortcut}
+                    </kbd>
+                  )}
                   <Button
                     size="sm"
                     variant="ghost"
@@ -248,7 +264,8 @@ export function PowerModePanel() {
                   </Button>
                 </div>
               </li>
-            ))}
+              );
+            })}
             {configs.length === 0 && (
               <p className="text-xs text-muted-foreground">
                 {t("powerMode.emptyList")}

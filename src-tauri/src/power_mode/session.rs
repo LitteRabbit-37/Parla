@@ -291,3 +291,60 @@ pub fn end_session(app: &AppHandle) {
 pub fn current(app: &AppHandle) -> Option<PowerSession> {
     app.try_state::<PowerSessionState>()?.0.lock().clone()
 }
+
+/// Liste des configs activees, dans l'ordre stocke. Mirroir VoiceInk
+/// `enabledConfigurations = configurations.filter { $0.isEnabled }`
+/// (PowerModeConfig.swift L300). Sert a la selection manuelle par index via
+/// les raccourcis Alt+chiffre et a compter les profils adressables.
+pub fn enabled_configs(app: &AppHandle) -> Vec<PowerModeConfig> {
+    config::load_all(app)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| c.is_enabled)
+        .collect()
+}
+
+/// Selectionne manuellement le Nieme profil active (raccourci Alt+chiffre,
+/// index 0-base). Contrairement a begin_session (matching auto fenetre/URL),
+/// on applique le profil demande explicitement.
+///
+/// Si une session Power Mode est deja active, on CONSERVE sa baseline
+/// d'origine : le restore de fin de dictee doit ramener aux reglages d'avant
+/// l'enregistrement, pas a ceux du profil precedemment applique. Sinon on
+/// snapshot l'etat courant (cas ou aucun profil n'avait matche au start).
+///
+/// Reference VoiceInk : MiniRecorderShortcutManager.setupPowerModeHandler ->
+/// setActiveConfiguration + PowerModeSessionManager.beginSession(with:).
+pub fn select_by_index(app: &AppHandle, index: usize) -> Option<PowerSession> {
+    let state = app.try_state::<PowerSessionState>()?;
+    let configs = enabled_configs(app);
+    let cfg = configs.get(index)?;
+
+    // Bind avant le match pour relacher le lock immediatement (ne pas le tenir
+    // pendant snapshot/apply).
+    let existing = state.0.lock().clone();
+    let baseline = match existing {
+        Some(s) => s.baseline,
+        None => snapshot(app),
+    };
+
+    if let Err(e) = apply(app, cfg) {
+        warn!("power_mode select apply: {e}");
+        return None;
+    }
+
+    let session = PowerSession {
+        config_id: cfg.id.clone(),
+        config_name: cfg.name.clone(),
+        emoji: cfg.emoji.clone(),
+        baseline,
+    };
+    *state.0.lock() = Some(session.clone());
+    let _ = config::set_active_id(app, Some(&session.config_id));
+    info!(
+        config = %session.config_name,
+        index,
+        "Power Mode selectionne via raccourci"
+    );
+    Some(session)
+}

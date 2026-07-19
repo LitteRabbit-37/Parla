@@ -24,7 +24,7 @@ import {
   type PowerModeConfig,
   type PowerSession,
 } from "@/lib/tauri";
-import { cn } from "@/lib/utils";
+import { cn, powerShortcutLabel } from "@/lib/utils";
 
 const COLLAPSED_HEIGHT = 120;
 const POPOVER_HEIGHT = 400;
@@ -417,21 +417,34 @@ function RecorderPowerModeButton({
             </div>
           ) : (
             <>
-              {configs.map((c) => (
-                <div
-                  key={c.id}
-                  className={cn(
-                    "flex items-center gap-2 rounded px-2 py-1.5 text-xs",
-                    c.id === session?.config_id && "bg-accent",
-                  )}
-                >
-                  <span className="text-lg leading-none">{c.emoji}</span>
-                  <span className="flex-1 truncate">{c.name}</span>
-                  {c.id === session?.config_id && (
-                    <Check className="h-3 w-3" />
-                  )}
-                </div>
-              ))}
+              {configs.map((c) => {
+                // Meme mapping que le backend : le raccourci cible le Nieme
+                // profil ACTIVE dans l'ordre stocke.
+                const enabledIdx = c.is_enabled
+                  ? configs.filter((x) => x.is_enabled).indexOf(c)
+                  : -1;
+                const shortcut = powerShortcutLabel(enabledIdx);
+                const isActive = c.id === session?.config_id;
+                return (
+                  <div
+                    key={c.id}
+                    className={cn(
+                      "flex items-center gap-2 rounded px-2 py-1.5 text-xs",
+                      isActive && "bg-accent",
+                      !c.is_enabled && "opacity-50",
+                    )}
+                  >
+                    <span className="text-lg leading-none">{c.emoji}</span>
+                    <span className="flex-1 truncate">{c.name}</span>
+                    {shortcut && (
+                      <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-[9px] font-medium text-muted-foreground">
+                        {shortcut}
+                      </kbd>
+                    )}
+                    {isActive && <Check className="h-3 w-3" />}
+                  </div>
+                );
+              })}
               <p className="mt-1 px-2 text-[10px] text-muted-foreground">
                 {t("miniRecorder.autoSwitch")}
               </p>

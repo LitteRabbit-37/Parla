@@ -45,6 +45,8 @@ pub enum HotkeyAction {
     CancelRecording,
     /// Transition en mode hands-free (toggle on, restera jusqu'a stop explicite).
     EnterHandsFree,
+    /// Selection directe du Nieme profil Power Mode active (Alt+chiffre).
+    SelectPowerMode(usize),
 }
 
 #[derive(Default)]
@@ -103,6 +105,12 @@ impl HotkeyManager {
             HotkeyEvent::Pressed { slot, timestamp } => self.on_pressed(slot, timestamp),
             HotkeyEvent::Released { slot, timestamp } => self.on_released(slot, timestamp),
             HotkeyEvent::EscapePressed { timestamp } => self.on_escape(timestamp),
+            // Selection Power Mode : pass-through direct, sans passer par la
+            // machine a etats toggle/PTT/hybrid ni le cooldown (le gating est
+            // fait en amont par le hook via POWER_SHORTCUT_COUNT).
+            HotkeyEvent::SelectPowerMode { index } => {
+                Some(HotkeyAction::SelectPowerMode(index))
+            }
         }
     }
 
@@ -357,6 +365,22 @@ mod tests {
                 timestamp: t0 + Duration::from_millis(100),
             }),
             Some(HotkeyAction::StopRecording)
+        );
+    }
+
+    #[test]
+    fn select_power_mode_passes_through_index() {
+        // SelectPowerMode contourne la machine a etats (toggle/PTT) et le
+        // cooldown : il retourne toujours l'action avec l'index, quel que
+        // soit l'etat courant du manager.
+        let m = HotkeyManager::with_modes(HotkeyMode::Hybrid, HotkeyMode::Hybrid);
+        assert_eq!(
+            m.handle_event(HotkeyEvent::SelectPowerMode { index: 0 }),
+            Some(HotkeyAction::SelectPowerMode(0))
+        );
+        assert_eq!(
+            m.handle_event(HotkeyEvent::SelectPowerMode { index: 9 }),
+            Some(HotkeyAction::SelectPowerMode(9))
         );
     }
 

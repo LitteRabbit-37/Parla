@@ -488,7 +488,8 @@
     "appsSingular": " app",
     "appsPlural": " apps",
     "urlsSingular": " URL",
-    "urlsPlural": " URLs"
+    "urlsPlural": " URLs",
+    "shortcutHint": "Atajo: durante la grabacion, manten Alt y pulsa este numero para cambiar a este perfil"
   },
   "recorder": {
     "title": "Grabador",
@@ -624,7 +625,7 @@
     "powerMode": "Modo Power",
     "noConfigs": "Sin configuracion definida. Cree un perfil para que Parla cambie automaticamente prompt + LLM + fuente segun la app activa.",
     "openPowerMode": "Abrir Modo Power",
-    "autoSwitch": "Cambia automaticamente segun la aplicacion actual."
+    "autoSwitch": "Cambia automaticamente segun la aplicacion actual. Alt+numero para elegir un perfil manualmente."
   },
   "promptDetection": {
     "triggerDetected": "Palabra activadora detectada: {{word}}",

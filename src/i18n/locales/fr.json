@@ -488,7 +488,8 @@
     "appsSingular": " app",
     "appsPlural": " apps",
     "urlsSingular": " URL",
-    "urlsPlural": " URLs"
+    "urlsPlural": " URLs",
+    "shortcutHint": "Raccourci : pendant l'enregistrement, maintenez Alt et appuyez sur ce chiffre pour basculer sur ce profil"
   },
   "recorder": {
     "title": "Enregistreur",
@@ -624,7 +625,7 @@
     "powerMode": "Power Mode",
     "noConfigs": "Aucune config definie. Cree un profil pour que Parla bascule automatiquement prompt + LLM + source selon l'app active.",
     "openPowerMode": "Ouvrir Power Mode",
-    "autoSwitch": "Active automatiquement selon l'application courante."
+    "autoSwitch": "Bascule automatiquement selon l'application courante. Alt+chiffre pour choisir un profil a la main."
   },
   "promptDetection": {
     "triggerDetected": "Mot declencheur detecte : {{word}}",

@@ -23,6 +23,7 @@
 //   - Modifier : touche modifier seule (ex Right Alt) - retro-compat 0.1.x.
 //   - Combo    : combinaison libre type Ctrl+Alt+R, F13, etc.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -126,6 +127,39 @@ pub enum HotkeyEvent {
     },
     /// La touche Escape a ete pressee (pour le double-tap cancel).
     EscapePressed { timestamp: Instant },
+    /// Alt+chiffre : selection directe du Nieme profil Power Mode active
+    /// (index 0-base). Reference VoiceInk MiniRecorderShortcutManager
+    /// selectPowerMode1..10 = Option+1..0. Pas de timestamp : la selection
+    /// n'a pas de logique de timing (pas de cooldown, une fire par pression
+    /// physique grace au gate !was_down cote hook).
+    SelectPowerMode { index: usize },
+}
+
+/// Nombre de profils Power Mode selectionnables via Alt+chiffre pendant que
+/// le mini-recorder est visible. 0 = raccourcis desactives (aucune touche
+/// Alt+chiffre n'est capturee). Mis a jour au start/stop d'un enregistrement.
+///
+/// Reference VoiceInk : MiniRecorderShortcutManager n'enregistre les
+/// shortcuts selectPowerMode1..10 que pendant la visibilite du recorder et
+/// uniquement pour les configurations activees (enabledConfigurations).
+static POWER_SHORTCUT_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// Active (n>0) ou desactive (n=0) la capture des raccourcis Alt+chiffre de
+/// selection Power Mode, en fixant le nombre de profils adressables.
+pub fn set_power_shortcut_count(n: usize) {
+    POWER_SHORTCUT_COUNT.store(n, Ordering::Relaxed);
+}
+
+/// Mappe un VK de chiffre de la rangee du haut vers un index de profil.
+/// 1->0, 2->1, ... 9->8, 0->9 (comme VoiceInk .one..-.zero). Le pave
+/// numerique (0x60-0x69) est volontairement ignore pour ne pas interferer
+/// avec les Alt-codes Windows.
+fn power_mode_digit_index(vk: u32) -> Option<usize> {
+    match vk {
+        0x31..=0x39 => Some((vk - 0x31) as usize), // '1'..'9' -> 0..8
+        0x30 => Some(9),                            // '0' -> 10e profil
+        _ => None,
+    }
 }
 
 #[allow(dead_code)] // certains champs uniquement utilises sous cfg(windows)
@@ -276,7 +310,12 @@ unsafe extern "system" fn low_level_proc(
 
         if is_down || is_up {
             if let Some(ctx) = HOOK_CONTEXT.get() {
-                handle_key(ctx, vk, is_down);
+                if handle_key(ctx, vk, is_down) {
+                    // Evenement consomme (Alt+chiffre Power Mode) : on ne le
+                    // propage pas a l'app cible, sinon le chiffre serait tape
+                    // dans le document sous le curseur.
+                    return LRESULT(1);
+                }
             }
         }
     }
@@ -299,8 +338,13 @@ const VK_LWIN: u32 = 0x5B;
 const VK_RWIN: u32 = 0x5C;
 const VK_ESCAPE: u32 = 0x1B;
 
+///
+/// Retourne `true` si l'evenement doit etre consomme (non propage a l'app
+/// cible). C'est le cas uniquement pour Alt+chiffre de selection Power Mode ;
+/// tous les autres cas (triggers record, Escape) retournent `false` pour
+/// preserver le comportement historique (l'app recoit bien la touche).
 #[cfg(windows)]
-fn handle_key(ctx: &HookContext, vk: u32, is_down: bool) {
+fn handle_key(ctx: &HookContext, vk: u32, is_down: bool) -> bool {
     let now = Instant::now();
     let mut watched = ctx.watched.lock();
     let idx = vk as usize & 0xFF;
@@ -320,18 +364,38 @@ fn handle_key(ctx: &HookContext, vk: u32, is_down: bool) {
                 .unwrap_or(false);
             if is_altgr {
                 watched.altgr_in_progress = true;
-                return;
+                return false;
             }
         } else if watched.altgr_in_progress {
             watched.altgr_in_progress = false;
-            return;
+            return false;
         }
     }
 
     // Escape pour double-tap cancel - independant des triggers.
     if vk == VK_ESCAPE && is_down && !was_down {
         let _ = ctx.tx.send(HotkeyEvent::EscapePressed { timestamp: now });
-        return;
+        return false;
+    }
+
+    // Selection Power Mode par Alt+chiffre pendant que le mini-recorder est
+    // visible (POWER_SHORTCUT_COUNT > 0). VoiceInk : selectPowerMode1..10 =
+    // Option+1..0. On ne capture QUE Alt seul (sans Ctrl/Shift/Win) pour ne
+    // pas voler AltGr+chiffre (AZERTY, Ctrl est down) ni les combos
+    // applicatifs, et on laisse passer si le chiffre correspond deja a un
+    // hotkey record configure (pour ne pas hijacker le raccourci de l'user).
+    let count = POWER_SHORTCUT_COUNT.load(Ordering::Relaxed);
+    if count > 0 && is_down && !was_down {
+        if let Some(index) = power_mode_digit_index(vk) {
+            let mods = current_modifiers(&watched.key_state);
+            let is_alt_only = mods.alt && !mods.ctrl && !mods.shift && !mods.win;
+            let clashes_trigger = trigger_matches(watched.primary, vk, mods)
+                || trigger_matches(watched.secondary, vk, mods);
+            if is_alt_only && !clashes_trigger && index < count {
+                let _ = ctx.tx.send(HotkeyEvent::SelectPowerMode { index });
+                return true;
+            }
+        }
     }
 
     // Match du VK contre les deux slots. Important : on teste primary
@@ -377,6 +441,9 @@ fn handle_key(ctx: &HookContext, vk: u32, is_down: bool) {
             timestamp: now,
         });
     }
+
+    // Aucun evenement Power Mode consomme : on laisse la touche se propager.
+    false
 }
 
 /// Etat courant des modifiers (lus depuis `key_state`).
@@ -448,5 +515,34 @@ fn release_check(trigger: HotkeyTrigger, vk: u32, is_down: bool, mods: Modifiers
                 || (shift && !mods.shift)
                 || (win && !mods.win)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::power_mode_digit_index;
+
+    #[test]
+    fn digit_index_maps_top_row_1_to_9() {
+        // '1'..'9' (VK 0x31..0x39) -> index 0..8 (VoiceInk selectPowerMode1..9).
+        for (vk, expected) in (0x31u32..=0x39).zip(0usize..) {
+            assert_eq!(power_mode_digit_index(vk), Some(expected));
+        }
+    }
+
+    #[test]
+    fn digit_index_maps_zero_to_tenth_slot() {
+        // '0' (VK 0x30) adresse le 10e profil -> index 9 (selectPowerMode10).
+        assert_eq!(power_mode_digit_index(0x30), Some(9));
+    }
+
+    #[test]
+    fn digit_index_ignores_numpad_and_other_keys() {
+        // Pave numerique (0x60-0x69) ignore pour ne pas capter les Alt-codes.
+        assert_eq!(power_mode_digit_index(0x60), None); // Numpad 0
+        assert_eq!(power_mode_digit_index(0x69), None); // Numpad 9
+        // Lettres et autres VK non concernes.
+        assert_eq!(power_mode_digit_index(0x41), None); // 'A'
+        assert_eq!(power_mode_digit_index(0x1B), None); // Escape
     }
 }
