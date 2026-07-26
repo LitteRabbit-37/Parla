@@ -25,6 +25,160 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> ProxyIo for T {}
 type BoxedIo = Box<dyn ProxyIo>;
 type WsStream = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<BoxedIo>>;
 
+fn streaming_connection_plan(
+    route: &crate::services::proxy::ProxyRoute,
+) -> anyhow::Result<&'static str> {
+    match route {
+        crate::services::proxy::ProxyRoute::Direct => Ok("direct"),
+        crate::services::proxy::ProxyRoute::System => Err(anyhow!(
+            "Windows system proxy is not supported for streaming WebSocket connections"
+        )),
+        crate::services::proxy::ProxyRoute::Explicit { url, .. } => {
+            let proxy = url::Url::parse(url).map_err(|error| {
+                let diagnostic = crate::services::download::sanitize_message(&error.to_string());
+                anyhow!("proxy URL: {diagnostic}")
+            })?;
+            match proxy.scheme() {
+                "http" => Ok("http"),
+                "https" => Ok("https"),
+                "socks5" => Ok("socks5"),
+                scheme => Err(anyhow!("unsupported WebSocket proxy scheme: {scheme}")),
+            }
+        }
+    }
+}
+
+fn http_connect_request(
+    addr: &str,
+    credentials: Option<&crate::services::proxy::ProxyCredentials>,
+) -> String {
+    let mut connect = format!("CONNECT {addr} HTTP/1.1\r\nHost: {addr}\r\n");
+    if let Some(c) = credentials {
+        use base64::Engine;
+        let token = base64::engine::general_purpose::STANDARD
+            .encode(format!("{}:{}", c.username, c.password));
+        connect.push_str(&format!("Proxy-Authorization: Basic {token}\r\n"));
+    }
+    connect.push_str("\r\n");
+    connect
+}
+
+#[cfg(test)]
+mod routing_tests {
+    use super::*;
+    use crate::services::proxy::{ProxyCredentials, ProxyRoute};
+
+    #[test]
+    fn connection_plan_covers_direct_and_explicit_routes() {
+        assert_eq!(
+            streaming_connection_plan(&ProxyRoute::Direct).unwrap(),
+            "direct"
+        );
+        assert_eq!(
+            streaming_connection_plan(&ProxyRoute::Explicit {
+                url: "http://proxy.example:8080".into(),
+                credentials: Some(ProxyCredentials {
+                    username: "user".into(),
+                    password: "secret".into(),
+                }),
+            })
+            .unwrap(),
+            "http"
+        );
+        assert_eq!(
+            streaming_connection_plan(&ProxyRoute::Explicit {
+                url: "https://proxy.example:8443".into(),
+                credentials: None,
+            })
+            .unwrap(),
+            "https"
+        );
+        assert_eq!(
+            streaming_connection_plan(&ProxyRoute::Explicit {
+                url: "socks5://proxy.example:1080".into(),
+                credentials: None,
+            })
+            .unwrap(),
+            "socks5"
+        );
+    }
+
+    #[test]
+    fn system_route_fails_clearly_without_exposing_credentials() {
+        let error = streaming_connection_plan(&ProxyRoute::System).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("Windows system proxy is not supported"));
+        assert!(!message.contains("secret"));
+        assert!(!message.contains("user"));
+    }
+
+    #[test]
+    fn proxy_url_errors_are_sanitized() {
+        let error = streaming_connection_plan(&ProxyRoute::Explicit {
+            // Malformed URL forces the actual `url::Url::parse` error path.
+            url: "http://user:secret@[".into(),
+            credentials: None,
+        })
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(!message.contains("user"));
+        assert!(!message.contains("secret"));
+    }
+
+    #[test]
+    fn http_connect_contains_target_and_encoded_credentials_only() {
+        let request = http_connect_request(
+            "api.example:443",
+            Some(&ProxyCredentials {
+                username: "proxy-user".into(),
+                password: "proxy-secret".into(),
+            }),
+        );
+        assert!(
+            request.starts_with("CONNECT api.example:443 HTTP/1.1\r\nHost: api.example:443\r\n")
+        );
+        assert!(request.contains("Proxy-Authorization: Basic "));
+        assert!(!request.contains("proxy-user"));
+        assert!(!request.contains("proxy-secret"));
+        assert!(request.ends_with("\r\n\r\n"));
+    }
+
+    #[tokio::test]
+    async fn no_proxy_route_is_direct_through_public_resolver() {
+        let _guard = crate::services::proxy::test_runtime_guard(
+            Some(ProxyRoute::Explicit {
+                url: "http://127.0.0.1:1".into(),
+                credentials: None,
+            }),
+            vec!["localhost".into()],
+        );
+        let route =
+            crate::services::proxy::route_for_url(&url::Url::parse("ws://localhost:443").unwrap())
+                .unwrap();
+        assert_eq!(route, ProxyRoute::Direct);
+    }
+
+    #[tokio::test]
+    async fn connect_timeout_cancels_handshake_against_controlled_listener() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let _guard = crate::services::proxy::test_runtime_guard(Some(ProxyRoute::Direct), vec![]);
+        let accept_task = tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+        let request = format!("ws://{address}/stream")
+            .into_client_request()
+            .unwrap();
+        let error = match connect_ws_with_timeout(request, Duration::from_millis(25)).await {
+            Ok(_) => panic!("controlled listener unexpectedly completed WebSocket handshake"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("timeout: ws connect"));
+        accept_task.abort();
+    }
+}
+
 /// Timeout pour l'etablissement d'une connexion WebSocket streaming.
 /// Une fois connecte, le flux peut durer indefiniment (pas de timeout global).
 pub const WS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -33,12 +187,16 @@ pub const WS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Remplace l'appel direct a `tokio_tungstenite::connect_async` pour eviter
 /// les hangs indefinis si le handshake bloque (firewall, proxy, DNS lent).
 pub async fn connect_ws(req: WsRequest) -> anyhow::Result<WsStream> {
+    connect_ws_with_timeout(req, WS_CONNECT_TIMEOUT).await
+}
+
+async fn connect_ws_with_timeout(req: WsRequest, timeout: Duration) -> anyhow::Result<WsStream> {
     let url_for_err = crate::services::download::sanitize_message(&req.uri().to_string());
-    match tokio::time::timeout(WS_CONNECT_TIMEOUT, connect_ws_inner(req)).await {
+    match tokio::time::timeout(timeout, connect_ws_inner(req)).await {
         Ok(result) => result,
         Err(_) => Err(anyhow!(
             "timeout: ws connect {url_for_err} (>{}s)",
-            WS_CONNECT_TIMEOUT.as_secs()
+            timeout.as_secs()
         )),
     }
 }
@@ -48,6 +206,7 @@ async fn connect_ws_inner(req: WsRequest) -> anyhow::Result<WsStream> {
     let url_for_err = crate::services::download::sanitize_message(&request_url);
     let target = url::Url::parse(&request_url).context("WebSocket URL")?;
     let route = crate::services::proxy::route_for_url(&target)?;
+    let connection_plan = streaming_connection_plan(&route)?;
     let host = target
         .host_str()
         .ok_or_else(|| anyhow!("WebSocket URL has no host"))?;
@@ -65,7 +224,10 @@ async fn connect_ws_inner(req: WsRequest) -> anyhow::Result<WsStream> {
             url: proxy_url,
             credentials,
         } => {
-            let proxy = url::Url::parse(&proxy_url)?;
+            let proxy = url::Url::parse(&proxy_url).map_err(|error| {
+                let diagnostic = crate::services::download::sanitize_message(&error.to_string());
+                anyhow!("proxy URL: {diagnostic}")
+            })?;
             let proxy_host = proxy
                 .host_str()
                 .ok_or_else(|| anyhow!("proxy has no host"))?;
@@ -77,7 +239,7 @@ async fn connect_ws_inner(req: WsRequest) -> anyhow::Result<WsStream> {
             } else {
                 format!("{proxy_host}:{proxy_port}")
             };
-            match proxy.scheme() {
+            match connection_plan {
                 "socks5" => Box::new(
                     match credentials {
                         Some(c) => {
@@ -117,14 +279,7 @@ async fn connect_ws_inner(req: WsRequest) -> anyhow::Result<WsStream> {
                     } else {
                         Box::new(raw)
                     };
-                    let mut connect = format!("CONNECT {addr} HTTP/1.1\r\nHost: {addr}\r\n");
-                    if let Some(c) = credentials {
-                        use base64::Engine;
-                        let token = base64::engine::general_purpose::STANDARD
-                            .encode(format!("{}:{}", c.username, c.password));
-                        connect.push_str(&format!("Proxy-Authorization: Basic {token}\r\n"));
-                    }
-                    connect.push_str("\r\n");
+                    let connect = http_connect_request(&addr, credentials.as_ref());
                     stream.write_all(connect.as_bytes()).await?;
                     let mut response = Vec::new();
                     let mut buf = [0u8; 512];
@@ -141,7 +296,7 @@ async fn connect_ws_inner(req: WsRequest) -> anyhow::Result<WsStream> {
                     }
                     Box::new(stream)
                 }
-                scheme => return Err(anyhow!("unsupported WebSocket proxy scheme: {scheme}")),
+                _ => unreachable!("streaming_connection_plan validates proxy scheme"),
             }
         }
         crate::services::proxy::ProxyRoute::System => {

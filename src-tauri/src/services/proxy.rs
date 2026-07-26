@@ -1,6 +1,8 @@
 //! Application proxy configuration and backend-only credential storage.
 use anyhow::{Context, Result};
 use keyring::Entry;
+#[cfg(test)]
+use parking_lot::Mutex;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
@@ -83,6 +85,38 @@ struct RuntimeProxy {
 static RUNTIME: OnceLock<RwLock<RuntimeProxy>> = OnceLock::new();
 fn runtime() -> &'static RwLock<RuntimeProxy> {
     RUNTIME.get_or_init(|| RwLock::new(RuntimeProxy::default()))
+}
+
+#[cfg(test)]
+pub(crate) struct TestRuntimeGuard {
+    previous: RuntimeProxy,
+    _lock: parking_lot::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+static TEST_RUNTIME_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[cfg(test)]
+impl Drop for TestRuntimeGuard {
+    fn drop(&mut self) {
+        *runtime().write() = self.previous.clone();
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_runtime_guard(
+    route: Option<ProxyRoute>,
+    no_proxy: Vec<String>,
+) -> TestRuntimeGuard {
+    let lock = TEST_RUNTIME_LOCK.get_or_init(|| Mutex::new(())).lock();
+    let mut state = runtime().write();
+    let previous = state.clone();
+    state.route = route;
+    state.no_proxy = no_proxy;
+    TestRuntimeGuard {
+        previous,
+        _lock: lock,
+    }
 }
 
 /// Load persisted settings and credentials into backend-only runtime state.
