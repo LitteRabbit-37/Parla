@@ -16,11 +16,12 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use reqwest::multipart::Form;
 use serde::Deserialize;
 use serde_json::json;
 
-use super::http::{batch_client, map_http_err, wav_part_from_path};
+use super::http::{
+    http_status_error, read_wav_with_filename, BatchHttpClient, HttpRequest, MultipartEncoder,
+};
 use super::provider::{CloudTranscriptionProvider, TranscribeRequest};
 
 pub struct SpeechmaticsProvider;
@@ -61,15 +62,12 @@ impl CloudTranscriptionProvider for SpeechmaticsProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client("https://asr.api.speechmatics.com/v2/jobs")?;
-        let resp = client
-            .get("https://asr.api.speechmatics.com/v2/jobs")
-            .bearer_auth(api_key)
-            .send()
-            .await
-            .map_err(map_http_err)?;
-        if !resp.status().is_success() {
-            anyhow::bail!("HTTP {}", resp.status());
+        let client = BatchHttpClient::new("https://asr.api.speechmatics.com/v2/jobs")?;
+        let request = HttpRequest::new("GET", "https://asr.api.speechmatics.com/v2/jobs")
+            .header("Authorization", format!("Bearer {api_key}"));
+        let response = client.send(request.clone()).await?;
+        if !(200..300).contains(&response.status) {
+            return Err(http_status_error(response.status, &response.body, &request));
         }
         Ok(())
     }
@@ -80,7 +78,7 @@ impl CloudTranscriptionProvider for SpeechmaticsProvider {
         api_key: &str,
         request: &TranscribeRequest,
     ) -> Result<String> {
-        let client = batch_client("https://asr.api.speechmatics.com/v2/jobs")?;
+        let client = BatchHttpClient::new("https://asr.api.speechmatics.com/v2/jobs")?;
 
         let lang = map_language_owned(request.language.as_deref());
         let mut transcription_config = serde_json::Map::new();
@@ -98,24 +96,30 @@ impl CloudTranscriptionProvider for SpeechmaticsProvider {
         let config_json = json!({
             "type": "transcription",
             "transcription_config": transcription_config,
-        })
-        .to_string();
+        });
 
-        let form = Form::new()
-            .text("config", config_json)
-            .part("data_file", wav_part_from_path(wav_path).await?);
+        let (wav, filename) = read_wav_with_filename(wav_path).await?;
+        let multipart = MultipartEncoder::random()
+            .field("config", serde_json::to_vec(&config_json)?)
+            .file("data_file", filename, "audio/wav", wav);
+        let submit_request = HttpRequest::new("POST", "https://asr.api.speechmatics.com/v2/jobs")
+            .header("Authorization", format!("Bearer {api_key}"))
+            .header("Content-Type", multipart.content_type())
+            .body(multipart.try_encode()?);
 
         // 1. Soumettre le job
-        let job_id = client
-            .post("https://asr.api.speechmatics.com/v2/jobs")
-            .bearer_auth(api_key)
-            .multipart(form)
-            .send()
+        let submit_response = client
+            .send(submit_request.clone())
             .await
-            .context("POST /v2/jobs")?
-            .error_for_status()?
-            .json::<JobCreated>()
-            .await
+            .context("POST /v2/jobs")?;
+        if !(200..300).contains(&submit_response.status) {
+            return Err(http_status_error(
+                submit_response.status,
+                &submit_response.body,
+                &submit_request,
+            ));
+        }
+        let job_id = serde_json::from_slice::<JobCreated>(&submit_response.body)
             .context("parse /v2/jobs response")?
             .id;
 
@@ -126,14 +130,20 @@ impl CloudTranscriptionProvider for SpeechmaticsProvider {
                 anyhow::bail!("timeout job Speechmatics");
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
-            let st: JobStatus = client
-                .get(format!("https://asr.api.speechmatics.com/v2/jobs/{job_id}"))
-                .bearer_auth(api_key)
-                .send()
-                .await?
-                .error_for_status()?
-                .json()
-                .await?;
+            let status_request = HttpRequest::new(
+                "GET",
+                format!("https://asr.api.speechmatics.com/v2/jobs/{job_id}"),
+            )
+            .header("Authorization", format!("Bearer {api_key}"));
+            let status_response = client.send(status_request.clone()).await?;
+            if !(200..300).contains(&status_response.status) {
+                return Err(http_status_error(
+                    status_response.status,
+                    &status_response.body,
+                    &status_request,
+                ));
+            }
+            let st: JobStatus = serde_json::from_slice(&status_response.body)?;
             match st.job.status.as_str() {
                 "done" => break,
                 "rejected" => anyhow::bail!("job Speechmatics rejete"),
@@ -143,17 +153,20 @@ impl CloudTranscriptionProvider for SpeechmaticsProvider {
         }
 
         // 3. Recuperation du transcript (texte brut)
-        let resp = client
-            .get(format!(
-                "https://asr.api.speechmatics.com/v2/jobs/{job_id}/transcript?format=txt"
-            ))
-            .bearer_auth(api_key)
-            .send()
-            .await?
-            .error_for_status()?;
-        let text = resp
-            .text()
-            .await
+        let transcript_request = HttpRequest::new(
+            "GET",
+            format!("https://asr.api.speechmatics.com/v2/jobs/{job_id}/transcript?format=txt"),
+        )
+        .header("Authorization", format!("Bearer {api_key}"));
+        let transcript_response = client.send(transcript_request.clone()).await?;
+        if !(200..300).contains(&transcript_response.status) {
+            return Err(http_status_error(
+                transcript_response.status,
+                &transcript_response.body,
+                &transcript_request,
+            ));
+        }
+        let text = String::from_utf8(transcript_response.body)
             .map_err(|e| anyhow!("lecture transcript: {e}"))?;
         Ok(text.trim().to_string())
     }

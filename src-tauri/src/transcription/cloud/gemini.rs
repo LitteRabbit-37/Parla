@@ -19,7 +19,7 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde::Deserialize;
 use serde_json::json;
 
-use super::http::{batch_client, map_http_err};
+use super::http::{http_status_error, BatchHttpClient, HttpRequest};
 use super::provider::{CloudTranscriptionProvider, TranscribeRequest};
 
 pub struct GeminiProvider;
@@ -51,15 +51,12 @@ impl CloudTranscriptionProvider for GeminiProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client("https://generativelanguage.googleapis.com/v1beta/models")?;
-        let resp = client
-            .get("https://generativelanguage.googleapis.com/v1beta/models")
-            .header("x-goog-api-key", api_key)
-            .send()
-            .await
-            .map_err(map_http_err)?;
-        if !resp.status().is_success() {
-            anyhow::bail!("HTTP {}", resp.status());
+        let url = "https://generativelanguage.googleapis.com/v1beta/models";
+        let client = BatchHttpClient::new(url)?;
+        let request = HttpRequest::new("GET", url).header("x-goog-api-key", api_key);
+        let response = client.send(request.clone()).await?;
+        if !(200..300).contains(&response.status) {
+            return Err(http_status_error(response.status, &response.body, &request));
         }
         Ok(())
     }
@@ -92,24 +89,18 @@ impl CloudTranscriptionProvider for GeminiProvider {
             request.model
         );
 
-        let client = batch_client(&url)?;
-        let resp = client
-            .post(&url)
+        let client = BatchHttpClient::new(&url)?;
+        let request = HttpRequest::new("POST", &url)
             .header("x-goog-api-key", api_key)
             .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(map_http_err)?;
-
-        let status = resp.status();
-        let body = resp.bytes().await?;
-        if !status.is_success() {
-            anyhow::bail!("HTTP {status}: {}", String::from_utf8_lossy(&body));
+            .body(serde_json::to_vec(&body)?);
+        let response = client.send(request.clone()).await?;
+        if !(200..300).contains(&response.status) {
+            return Err(http_status_error(response.status, &response.body, &request));
         }
 
-        let parsed: GeminiResponse =
-            serde_json::from_slice(&body).map_err(|e| anyhow!("parse JSON Gemini: {e}"))?;
+        let parsed: GeminiResponse = serde_json::from_slice(&response.body)
+            .map_err(|e| anyhow!("parse JSON Gemini: {e}"))?;
         let text = parsed
             .candidates
             .first()

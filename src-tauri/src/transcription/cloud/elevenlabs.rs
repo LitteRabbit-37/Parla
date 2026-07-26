@@ -10,10 +10,9 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use reqwest::multipart::Form;
 use serde::Deserialize;
 
-use super::http::{batch_client, map_http_err, wav_part_from_path};
+use super::http::{http_status_error, BatchHttpClient, HttpRequest, MultipartEncoder};
 use super::provider::{CloudTranscriptionProvider, TranscribeRequest};
 
 pub struct ElevenLabsProvider;
@@ -30,15 +29,12 @@ impl CloudTranscriptionProvider for ElevenLabsProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client("https://api.elevenlabs.io/v1/user")?;
-        let resp = client
-            .get("https://api.elevenlabs.io/v1/user")
-            .header("xi-api-key", api_key)
-            .send()
-            .await
-            .map_err(map_http_err)?;
-        if !resp.status().is_success() {
-            anyhow::bail!("HTTP {}", resp.status());
+        let url = "https://api.elevenlabs.io/v1/user";
+        let client = BatchHttpClient::new(url)?;
+        let request = HttpRequest::new("GET", url).header("xi-api-key", api_key);
+        let response = client.send(request.clone()).await?;
+        if !(200..300).contains(&response.status) {
+            return Err(http_status_error(response.status, &response.body, &request));
         }
         Ok(())
     }
@@ -49,36 +45,37 @@ impl CloudTranscriptionProvider for ElevenLabsProvider {
         api_key: &str,
         request: &TranscribeRequest,
     ) -> Result<String> {
-        let mut form = Form::new()
-            .part("file", wav_part_from_path(wav_path).await?)
-            .text("model_id", request.model.clone())
-            .text("temperature", "0.0")
-            .text("tag_audio_events", "false");
+        let audio = tokio::fs::read(wav_path).await?;
+        let filename = wav_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("audio.wav");
+        let mut form = MultipartEncoder::random()
+            .file("file", filename, "audio/wav", audio)
+            .field("model_id", request.model.clone())
+            .field("temperature", "0.0")
+            .field("tag_audio_events", "false");
 
         if let Some(lang) = request.language.as_deref() {
             if !lang.is_empty() && lang != "auto" {
-                form = form.text("language_code", lang.to_string());
+                form = form.field("language_code", lang.to_string());
             }
         }
 
-        let client = batch_client("https://api.elevenlabs.io/v1/speech-to-text")?;
-        let resp = client
-            .post("https://api.elevenlabs.io/v1/speech-to-text")
+        let url = "https://api.elevenlabs.io/v1/speech-to-text";
+        let client = BatchHttpClient::new(url)?;
+        let request = HttpRequest::new("POST", url)
             .header("xi-api-key", api_key)
             .header("Accept", "application/json")
-            .multipart(form)
-            .send()
-            .await
-            .map_err(map_http_err)?;
-
-        let status = resp.status();
-        let body = resp.bytes().await?;
-        if !status.is_success() {
-            anyhow::bail!("HTTP {status}: {}", String::from_utf8_lossy(&body));
+            .header("Content-Type", form.content_type())
+            .body(form.try_encode()?);
+        let response = client.send(request.clone()).await?;
+        if !(200..300).contains(&response.status) {
+            return Err(http_status_error(response.status, &response.body, &request));
         }
 
         let parsed: ElevenLabsResponse =
-            serde_json::from_slice(&body).map_err(|e| anyhow!("parse JSON: {e}"))?;
+            serde_json::from_slice(&response.body).map_err(|e| anyhow!("parse JSON: {e}"))?;
         Ok(parsed.text)
     }
 }

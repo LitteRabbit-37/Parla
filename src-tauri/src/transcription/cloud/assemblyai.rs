@@ -20,7 +20,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::http::{batch_client, map_http_err};
+use super::http::{http_status_error, BatchHttpClient, HttpRequest};
 use super::provider::{CloudTranscriptionProvider, TranscribeRequest};
 
 pub struct AssemblyAiProvider;
@@ -54,15 +54,12 @@ impl CloudTranscriptionProvider for AssemblyAiProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client("https://api.assemblyai.com/v2/transcript")?;
-        let resp = client
-            .get(format!("{API_BASE}/v2/transcript"))
-            .header("Authorization", api_key)
-            .send()
-            .await
-            .map_err(map_http_err)?;
-        if !resp.status().is_success() {
-            anyhow::bail!("HTTP {} (cle API invalide ?)", resp.status());
+        let client = BatchHttpClient::new("https://api.assemblyai.com/v2/transcript")?;
+        let request = HttpRequest::new("GET", format!("{API_BASE}/v2/transcript"))
+            .header("Authorization", api_key);
+        let response = client.send(request.clone()).await?;
+        if !(200..300).contains(&response.status) {
+            return Err(http_status_error(response.status, &response.body, &request));
         }
         Ok(())
     }
@@ -73,7 +70,7 @@ impl CloudTranscriptionProvider for AssemblyAiProvider {
         api_key: &str,
         request: &TranscribeRequest,
     ) -> Result<String> {
-        let client = batch_client("https://api.assemblyai.com/v2/upload")?;
+        let client = BatchHttpClient::new("https://api.assemblyai.com/v2/upload")?;
         let bytes = tokio::fs::read(wav_path)
             .await
             .with_context(|| format!("lecture {}", wav_path.display()))?;
@@ -112,64 +109,48 @@ impl CloudTranscriptionProvider for AssemblyAiProvider {
             payload.insert("keyterms_prompt".into(), json!(keyterms));
         }
 
-        let resp = client
-            .post(format!("{API_BASE}/v2/transcript"))
+        let body = serde_json::to_vec(&payload).context("serialize create request")?;
+        let request = HttpRequest::new("POST", format!("{API_BASE}/v2/transcript"))
             .header("Authorization", api_key)
-            .json(&payload)
-            .send()
-            .await
-            .map_err(map_http_err)?;
-        let status = resp.status();
-        let body = resp.bytes().await?;
-        if !status.is_success() {
-            anyhow::bail!("HTTP {status}: {}", String::from_utf8_lossy(&body));
+            .header("Content-Type", "application/json")
+            .body(body);
+        let response = client.send(request.clone()).await?;
+        if !(200..300).contains(&response.status) {
+            return Err(http_status_error(response.status, &response.body, &request));
         }
         let created: CreateResponse =
-            serde_json::from_slice(&body).context("parse create response")?;
+            serde_json::from_slice(&response.body).context("parse create response")?;
 
         // 3. Poll
         poll_transcript(&client, api_key, &created.id).await
     }
 }
 
-async fn upload(client: &reqwest::Client, api_key: &str, bytes: Vec<u8>) -> Result<String> {
-    let resp = client
-        .post(format!("{API_BASE}/v2/upload"))
+async fn upload(client: &BatchHttpClient, api_key: &str, bytes: Vec<u8>) -> Result<String> {
+    let request = HttpRequest::new("POST", format!("{API_BASE}/v2/upload"))
         .header("Authorization", api_key)
         .header("Content-Type", "application/octet-stream")
-        .body(bytes)
-        .send()
-        .await
-        .map_err(map_http_err)?;
-    let status = resp.status();
-    let body = resp.bytes().await?;
-    if !status.is_success() {
-        anyhow::bail!(
-            "HTTP {status} sur /v2/upload: {}",
-            String::from_utf8_lossy(&body)
-        );
+        .body(bytes);
+    let response = client.send(request.clone()).await?;
+    if !(200..300).contains(&response.status) {
+        return Err(http_status_error(response.status, &response.body, &request));
     }
-    let parsed: UploadResponse = serde_json::from_slice(&body).context("parse upload response")?;
+    let parsed: UploadResponse =
+        serde_json::from_slice(&response.body).context("parse upload response")?;
     Ok(parsed.upload_url)
 }
 
-async fn poll_transcript(client: &reqwest::Client, api_key: &str, id: &str) -> Result<String> {
+async fn poll_transcript(client: &BatchHttpClient, api_key: &str, id: &str) -> Result<String> {
     let url = format!("{API_BASE}/v2/transcript/{id}");
     let start = std::time::Instant::now();
     loop {
-        let resp = client
-            .get(&url)
-            .header("Authorization", api_key)
-            .send()
-            .await
-            .map_err(map_http_err)?;
-        let status = resp.status();
-        let body = resp.bytes().await?;
-        if !status.is_success() {
-            anyhow::bail!("HTTP {status}: {}", String::from_utf8_lossy(&body));
+        let request = HttpRequest::new("GET", &url).header("Authorization", api_key);
+        let response = client.send(request.clone()).await?;
+        if !(200..300).contains(&response.status) {
+            return Err(http_status_error(response.status, &response.body, &request));
         }
         let parsed: StatusResponse =
-            serde_json::from_slice(&body).context("parse status response")?;
+            serde_json::from_slice(&response.body).context("parse status response")?;
         match parsed.status.to_lowercase().as_str() {
             "completed" => {
                 let text = parsed.text.unwrap_or_default();

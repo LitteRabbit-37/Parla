@@ -9,10 +9,9 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use reqwest::multipart::Form;
 use serde::Deserialize;
 
-use super::http::{batch_client, map_http_err, wav_part_from_path};
+use super::http::{http_status_error, BatchHttpClient, HttpRequest, MultipartEncoder};
 use super::provider::{CloudTranscriptionProvider, TranscribeRequest};
 
 pub struct GroqProvider;
@@ -29,15 +28,13 @@ impl CloudTranscriptionProvider for GroqProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client("https://api.groq.com/openai/v1/models")?;
-        let resp = client
-            .get("https://api.groq.com/openai/v1/models")
-            .bearer_auth(api_key)
-            .send()
-            .await
-            .map_err(map_http_err)?;
-        if !resp.status().is_success() {
-            anyhow::bail!("HTTP {} (cle API invalide ?)", resp.status());
+        let url = "https://api.groq.com/openai/v1/models";
+        let client = BatchHttpClient::new(url)?;
+        let request =
+            HttpRequest::new("GET", url).header("Authorization", format!("Bearer {api_key}"));
+        let response = client.send(request.clone()).await?;
+        if !(200..300).contains(&response.status) {
+            return Err(http_status_error(response.status, &response.body, &request));
         }
         Ok(())
     }
@@ -48,43 +45,47 @@ impl CloudTranscriptionProvider for GroqProvider {
         api_key: &str,
         request: &TranscribeRequest,
     ) -> Result<String> {
-        let mut form = Form::new()
-            .part("file", wav_part_from_path(wav_path).await?)
-            .text("model", request.model.clone())
-            .text("response_format", "json")
-            .text("temperature", "0");
+        let audio = tokio::fs::read(wav_path).await?;
+        let filename = wav_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("audio.wav");
+        let mut form = MultipartEncoder::random()
+            .file("file", filename, "audio/wav", audio)
+            .field("model", request.model.clone())
+            .field("response_format", "json")
+            .field("temperature", "0");
 
         if let Some(lang) = request.language.as_deref() {
             if !lang.is_empty() && lang != "auto" {
-                form = form.text("language", lang.to_string());
+                form = form.field("language", lang.to_string());
             }
         }
         if let Some(prompt) = request.prompt.as_deref() {
             if !prompt.is_empty() {
-                form = form.text("prompt", prompt.to_string());
+                form = form.field("prompt", prompt.to_string());
             }
         }
 
-        let client = batch_client("https://api.groq.com/openai/v1/audio/transcriptions")?;
-        let resp = client
-            .post("https://api.groq.com/openai/v1/audio/transcriptions")
-            .bearer_auth(api_key)
-            .multipart(form)
-            .send()
-            .await
-            .map_err(map_http_err)?;
-
-        let status = resp.status();
-        let body = resp.bytes().await?;
-        if !status.is_success() {
-            let msg = String::from_utf8_lossy(&body);
-            anyhow::bail!("HTTP {status}: {msg}");
+        let url = "https://api.groq.com/openai/v1/audio/transcriptions";
+        let client = BatchHttpClient::new(url)?;
+        let http_request = HttpRequest::new("POST", url)
+            .header("Authorization", format!("Bearer {api_key}"))
+            .header("Content-Type", form.content_type())
+            .body(form.try_encode()?);
+        let response = client.send(http_request.clone()).await?;
+        if !(200..300).contains(&response.status) {
+            return Err(http_status_error(
+                response.status,
+                &response.body,
+                &http_request,
+            ));
         }
 
         // Fallback : si le JSON ne decode pas, essayer le body brut en UTF-8.
-        match serde_json::from_slice::<GroqResponse>(&body) {
+        match serde_json::from_slice::<GroqResponse>(&response.body) {
             Ok(r) => r.text.ok_or_else(|| anyhow!("reponse sans champ text")),
-            Err(_) => Ok(String::from_utf8_lossy(&body).trim().to_string()),
+            Err(_) => Ok(String::from_utf8_lossy(&response.body).trim().to_string()),
         }
     }
 }

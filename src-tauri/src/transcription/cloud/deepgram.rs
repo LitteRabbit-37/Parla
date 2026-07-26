@@ -13,7 +13,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use serde::Deserialize;
 
-use super::http::{batch_client, map_http_err};
+use super::http::{http_status_error, BatchHttpClient, HttpRequest};
 use super::provider::{CloudTranscriptionProvider, TranscribeRequest};
 
 pub struct DeepgramProvider;
@@ -42,15 +42,12 @@ impl CloudTranscriptionProvider for DeepgramProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client("https://api.deepgram.com/v1/projects")?;
-        let resp = client
-            .get("https://api.deepgram.com/v1/projects")
-            .header("Authorization", format!("Token {api_key}"))
-            .send()
-            .await
-            .map_err(map_http_err)?;
-        if !resp.status().is_success() {
-            anyhow::bail!("HTTP {}", resp.status());
+        let client = BatchHttpClient::new("https://api.deepgram.com/v1/projects")?;
+        let request = HttpRequest::new("GET", "https://api.deepgram.com/v1/projects")
+            .header("Authorization", format!("Token {api_key}"));
+        let response = client.send(request.clone()).await?;
+        if !(200..300).contains(&response.status) {
+            return Err(http_status_error(response.status, &response.body, &request));
         }
         Ok(())
     }
@@ -76,23 +73,17 @@ impl CloudTranscriptionProvider for DeepgramProvider {
             url.push_str(&format!("&keyterm={}", urlencoding::encode(term)));
         }
 
-        let client = batch_client(&url)?;
-        let resp = client
-            .post(&url)
+        let client = BatchHttpClient::new(&url)?;
+        let request = HttpRequest::new("POST", &url)
             .header("Authorization", format!("Token {api_key}"))
             .header("Content-Type", "audio/wav")
-            .body(audio_bytes)
-            .send()
-            .await
-            .map_err(map_http_err)?;
-
-        let status = resp.status();
-        let body = resp.bytes().await?;
-        if !status.is_success() {
-            anyhow::bail!("HTTP {status}: {}", String::from_utf8_lossy(&body));
+            .body(audio_bytes);
+        let response = client.send(request.clone()).await?;
+        if !(200..300).contains(&response.status) {
+            return Err(http_status_error(response.status, &response.body, &request));
         }
-        let parsed: DeepgramResponse =
-            serde_json::from_slice(&body).map_err(|e| anyhow!("parse JSON Deepgram: {e}"))?;
+        let parsed: DeepgramResponse = serde_json::from_slice(&response.body)
+            .map_err(|e| anyhow!("parse JSON Deepgram: {e}"))?;
         let transcript = parsed
             .results
             .channels

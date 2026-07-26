@@ -14,10 +14,11 @@ use std::path::Path;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use reqwest::multipart::Form;
 use serde::Deserialize;
 
-use super::http::{batch_client, map_http_err, wav_part_from_path};
+use super::http::{
+    http_status_error, read_wav_with_filename, BatchHttpClient, HttpRequest, MultipartEncoder,
+};
 use super::provider::{CloudTranscriptionProvider, TranscribeRequest};
 
 pub struct XaiProvider;
@@ -34,15 +35,12 @@ impl CloudTranscriptionProvider for XaiProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client("https://api.x.ai/v1/api-key")?;
-        let resp = client
-            .get("https://api.x.ai/v1/api-key")
-            .bearer_auth(api_key)
-            .send()
-            .await
-            .map_err(map_http_err)?;
-        if !resp.status().is_success() {
-            anyhow::bail!("HTTP {} (cle API invalide ?)", resp.status());
+        let client = BatchHttpClient::new("https://api.x.ai/v1/api-key")?;
+        let request = HttpRequest::new("GET", "https://api.x.ai/v1/api-key")
+            .header("Authorization", format!("Bearer {api_key}"));
+        let response = client.send(request.clone()).await?;
+        if !(200..300).contains(&response.status) {
+            return Err(http_status_error(response.status, &response.body, &request));
         }
         Ok(())
     }
@@ -55,42 +53,37 @@ impl CloudTranscriptionProvider for XaiProvider {
     ) -> Result<String> {
         // Ordre des champs important pour xAI : `language` et `format` AVANT
         // `file`, ce dernier doit etre en dernier (cf. LLMkit XAIClient L37).
-        let mut form = Form::new();
+        let mut multipart = MultipartEncoder::random();
 
         let lang_provided = match request.language.as_deref() {
             Some(lang) if !lang.is_empty() && lang != "auto" => {
-                form = form.text("language", lang.to_string());
+                multipart = multipart.field("language", lang.as_bytes().to_vec());
                 true
             }
             _ => false,
         };
         if lang_provided {
             // ITN n'a de sens que quand on connait la langue.
-            form = form.text("format", "true");
+            multipart = multipart.field("format", b"true".to_vec());
         }
 
-        form = form.part("file", wav_part_from_path(wav_path).await?);
+        let (wav, filename) = read_wav_with_filename(wav_path).await?;
+        multipart = multipart.file("file", filename, "audio/wav", wav);
 
-        let client = batch_client("https://api.x.ai/v1/stt")?;
-        let resp = client
-            .post("https://api.x.ai/v1/stt")
-            .bearer_auth(api_key)
+        let client = BatchHttpClient::new("https://api.x.ai/v1/stt")?;
+        let request = HttpRequest::new("POST", "https://api.x.ai/v1/stt")
+            .header("Authorization", format!("Bearer {api_key}"))
             .header("Accept", "application/json")
-            .multipart(form)
-            .send()
-            .await
-            .map_err(map_http_err)?;
-
-        let status = resp.status();
-        let body = resp.bytes().await?;
-        if !status.is_success() {
-            let msg = String::from_utf8_lossy(&body);
-            anyhow::bail!("HTTP {status}: {msg}");
+            .header("Content-Type", multipart.content_type())
+            .body(multipart.try_encode()?);
+        let response = client.send(request.clone()).await?;
+        if !(200..300).contains(&response.status) {
+            return Err(http_status_error(response.status, &response.body, &request));
         }
 
-        match serde_json::from_slice::<XaiResponse>(&body) {
+        match serde_json::from_slice::<XaiResponse>(&response.body) {
             Ok(r) => Ok(r.text.unwrap_or_default()),
-            Err(_) => Ok(String::from_utf8_lossy(&body).trim().to_string()),
+            Err(_) => Ok(String::from_utf8_lossy(&response.body).trim().to_string()),
         }
     }
 }
