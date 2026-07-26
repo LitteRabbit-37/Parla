@@ -250,24 +250,21 @@ impl ModelManager {
         let _ = fs::remove_file(&tmp);
 
         let url = url::Url::parse(model.url)?;
-        if crate::services::proxy::uses_system_proxy() {
+        if matches!(
+            crate::services::proxy::route_for_url(&url)?,
+            crate::services::proxy::ProxyRoute::System
+        ) {
             return self
-                .download_system_worker(
-                    id,
-                    model.url,
-                    model.size_bytes,
-                    target,
-                    tmp,
-                    url,
-                    cancel,
-                )
+                .download_system_worker(id, model.url, model.size_bytes, target, tmp, url, cancel)
                 .await;
         }
         let host = url.host_str().unwrap_or("?");
         let apply_started = std::time::Instant::now();
         info!(id, host, "Model download proxy setup started");
-        let (builder, route_diagnostic) =
-            crate::services::proxy::apply_for_url_with_diagnostic(reqwest::Client::builder(), &url)?;
+        let (builder, route_diagnostic) = crate::services::proxy::apply_for_url_with_diagnostic(
+            reqwest::Client::builder(),
+            &url,
+        )?;
         let client = builder.build()?;
         info!(
             id,
@@ -332,17 +329,18 @@ impl ModelManager {
             }
         };
         if !resp.status().is_success() {
-            let auth_schemes = if resp.status() == reqwest::StatusCode::PROXY_AUTHENTICATION_REQUIRED {
-                resp.headers()
-                    .get_all(reqwest::header::PROXY_AUTHENTICATE)
-                    .iter()
-                    .filter_map(|value| value.to_str().ok())
-                    .filter_map(|value| value.split_whitespace().next())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            } else {
-                String::new()
-            };
+            let auth_schemes =
+                if resp.status() == reqwest::StatusCode::PROXY_AUTHENTICATION_REQUIRED {
+                    resp.headers()
+                        .get_all(reqwest::header::PROXY_AUTHENTICATE)
+                        .iter()
+                        .filter_map(|value| value.to_str().ok())
+                        .filter_map(|value| value.split_whitespace().next())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                } else {
+                    String::new()
+                };
             warn!(
                 id,
                 host,
@@ -451,8 +449,16 @@ impl ModelManager {
                     .build()
                     .map_err(|error| anyhow!("system download runtime: {error}"))?;
                 runtime.block_on(system_download_worker(
-                    worker_app, worker_id, worker_url, model_size, target, tmp, url,
-                    worker_cancel, worker_abandoned, sender.clone(),
+                    worker_app,
+                    worker_id,
+                    worker_url,
+                    model_size,
+                    target,
+                    tmp,
+                    url,
+                    worker_cancel,
+                    worker_abandoned,
+                    sender.clone(),
                 ))
             }))
             .unwrap_or_else(|_| Err(anyhow!("system download worker panicked")));
@@ -566,11 +572,14 @@ async fn system_download_worker(
                 return false;
             }
             let _ = sender.try_send(SystemDownloadMessage::Activity);
-            let _ = app_for_worker.emit("model:download:progress", DownloadProgress {
-                id: id_for_worker.clone(),
-                downloaded,
-                total,
-            });
+            let _ = app_for_worker.emit(
+                "model:download:progress",
+                DownloadProgress {
+                    id: id_for_worker.clone(),
+                    downloaded,
+                    total,
+                },
+            );
             true
         },
     )?;
@@ -578,18 +587,22 @@ async fn system_download_worker(
         let _ = fs::remove_file(&tmp);
         return Err(anyhow!("system download abandoned"));
     }
-    let _ = app.emit("model:download:progress", DownloadProgress {
-        id: id.clone(),
-        downloaded,
-        total: model_size,
-    });
+    let _ = app.emit(
+        "model:download:progress",
+        DownloadProgress {
+            id: id.clone(),
+            downloaded,
+            total: model_size,
+        },
+    );
     fs::rename(&tmp, &target)
         .with_context(|| format!("rename {} -> {}", tmp.display(), target.display()))?;
-    let _ = app.emit("model:download:complete", DownloadComplete {
-        id,
-        path: target.to_string_lossy().into_owned(),
-    });
+    let _ = app.emit(
+        "model:download:complete",
+        DownloadComplete {
+            id,
+            path: target.to_string_lossy().into_owned(),
+        },
+    );
     Ok(target)
-
-
 }

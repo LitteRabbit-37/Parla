@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tracing::info;
 
-use crate::transcription::{model_manager::ModelManager, whisper::{WhisperEngine, WhisperParams}};
+use crate::transcription::{
+    model_manager::ModelManager,
+    whisper::{WhisperEngine, WhisperParams},
+};
 
 pub struct WhisperEngineState(pub Arc<WhisperEngine>);
 
@@ -66,9 +69,7 @@ pub async fn transcribe_wav(
     let model_id = req.model_id.clone();
     let start = std::time::Instant::now();
     let text = tokio::task::spawn_blocking(move || -> Result<String, String> {
-        engine
-            .load(&model_path)
-            .map_err(|e| e.to_string())?;
+        engine.load(&model_path).map_err(|e| e.to_string())?;
         engine
             .transcribe_wav(&wav_path, &params)
             .map_err(|e| e.to_string())
@@ -77,7 +78,12 @@ pub async fn transcribe_wav(
     .map_err(|e| format!("tache transcription panic: {e}"))??;
 
     let duration_ms = start.elapsed().as_millis() as u64;
-    info!(model_id, chars = text.len(), duration_ms, "Transcription terminee");
+    info!(
+        model_id,
+        chars = text.len(),
+        duration_ms,
+        "Transcription terminee"
+    );
 
     Ok(TranscribeResponse {
         text,

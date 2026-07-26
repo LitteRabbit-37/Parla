@@ -42,7 +42,7 @@ impl CloudTranscriptionProvider for DeepgramProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client()?;
+        let client = batch_client("https://api.deepgram.com/v1/projects")?;
         let resp = client
             .get("https://api.deepgram.com/v1/projects")
             .header("Authorization", format!("Token {api_key}"))
@@ -76,7 +76,7 @@ impl CloudTranscriptionProvider for DeepgramProvider {
             url.push_str(&format!("&keyterm={}", urlencoding::encode(term)));
         }
 
-        let client = batch_client()?;
+        let client = batch_client(&url)?;
         let resp = client
             .post(&url)
             .header("Authorization", format!("Token {api_key}"))
@@ -91,8 +91,8 @@ impl CloudTranscriptionProvider for DeepgramProvider {
         if !status.is_success() {
             anyhow::bail!("HTTP {status}: {}", String::from_utf8_lossy(&body));
         }
-        let parsed: DeepgramResponse = serde_json::from_slice(&body)
-            .map_err(|e| anyhow!("parse JSON Deepgram: {e}"))?;
+        let parsed: DeepgramResponse =
+            serde_json::from_slice(&body).map_err(|e| anyhow!("parse JSON Deepgram: {e}"))?;
         let transcript = parsed
             .results
             .channels

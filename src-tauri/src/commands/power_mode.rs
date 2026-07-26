@@ -18,7 +18,10 @@ pub fn list_power_configs(app: AppHandle) -> Result<Vec<PowerModeConfig>, String
 }
 
 #[command]
-pub fn add_power_config(app: AppHandle, config: PowerModeConfig) -> Result<PowerModeConfig, String> {
+pub fn add_power_config(
+    app: AppHandle,
+    config: PowerModeConfig,
+) -> Result<PowerModeConfig, String> {
     let mut all = config::load_all(&app).map_err(|e| e.to_string())?;
     let mut c = config;
     if c.id.is_empty() {

@@ -50,7 +50,7 @@ impl CloudTranscriptionProvider for SonioxProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client()?;
+        let client = batch_client("https://api.soniox.com/v1/files")?;
         let resp = client
             .get("https://api.soniox.com/v1/files")
             .bearer_auth(api_key)
@@ -69,7 +69,7 @@ impl CloudTranscriptionProvider for SonioxProvider {
         api_key: &str,
         request: &TranscribeRequest,
     ) -> Result<String> {
-        let client = batch_client()?;
+        let client = batch_client("https://api.soniox.com/v1/files")?;
 
         // 1. Upload du fichier
         let form = Form::new().part("file", wav_part_from_path(wav_path).await?);
@@ -131,7 +131,9 @@ impl CloudTranscriptionProvider for SonioxProvider {
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
             let status: StatusResponse = client
-                .get(format!("https://api.soniox.com/v1/transcriptions/{trans_id}"))
+                .get(format!(
+                    "https://api.soniox.com/v1/transcriptions/{trans_id}"
+                ))
                 .bearer_auth(api_key)
                 .send()
                 .await?

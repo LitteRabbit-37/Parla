@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
-use tracing::{debug, info, warn};
 use url::Url;
 
 const CREDENTIAL_SERVICE: &str = "Parla.ApplicationProxy";
@@ -185,7 +184,10 @@ fn apply_route(
         ProxyRoute::Direct => builder.no_proxy(),
         ProxyRoute::System => anyhow::bail!("unresolved system proxy route"),
         ProxyRoute::Explicit { url, credentials } => {
-            let mut proxy = reqwest::Proxy::all(&url).map_err(|e| anyhow::anyhow!("proxy: {e}"))?;
+            let mut proxy = reqwest::Proxy::all(&url).map_err(|e| {
+                let diagnostic = crate::services::download::sanitize_message(&e.to_string());
+                anyhow::anyhow!("proxy: {diagnostic}")
+            })?;
             if let Some(c) = credentials {
                 proxy = proxy.basic_auth(&c.username, &c.password);
             }
@@ -201,242 +203,34 @@ fn apply_route(
 
 pub fn route_for_url(url: &Url) -> Result<ProxyRoute> {
     let state = runtime().read().clone();
-    if state.no_proxy.iter().any(|_| {
-        no_proxy_matches(
-            url.host_str().unwrap_or_default(),
-            url.port_or_known_default(),
-            &state.no_proxy,
-        )
-    }) {
-        if !matches!(state.route, Some(ProxyRoute::System)) {
-            return Ok(ProxyRoute::Direct);
+    select_route(state.route, &state.no_proxy, url)
+}
+
+fn select_route(route: Option<ProxyRoute>, no_proxy: &[String], url: &Url) -> Result<ProxyRoute> {
+    match route {
+        Some(ProxyRoute::Explicit { .. })
+            if no_proxy_matches(
+                url.host_str().unwrap_or_default(),
+                url.port_or_known_default(),
+                no_proxy,
+            ) =>
+        {
+            Ok(ProxyRoute::Direct)
         }
-    }
-    match state.route {
         Some(ProxyRoute::System) => resolve_system(url),
         Some(route) => Ok(route),
         None => anyhow::bail!("proxy policy not configured"),
     }
 }
 
-/// Returns configured routing mode without resolving a destination.
-pub fn uses_system_proxy() -> bool {
-    matches!(runtime().read().route, Some(ProxyRoute::System))
-}
-
 /// Resolve Windows Internet proxy settings for one destination. No environment
 /// fallback: system mode is deliberately WinHTTP-only.
 #[cfg(windows)]
-fn resolve_system(url: &Url) -> Result<ProxyRoute> {
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    static SYSTEM_RESOLVER_BUSY: OnceLock<AtomicBool> = OnceLock::new();
-    let busy = SYSTEM_RESOLVER_BUSY.get_or_init(|| AtomicBool::new(false));
-    if busy.swap(true, Ordering::Acquire) {
-        anyhow::bail!("Windows system proxy resolution is still busy from a previous WPAD attempt");
-    }
-
-    struct ResolverGuard<'a>(&'a AtomicBool);
-    impl Drop for ResolverGuard<'_> {
-        fn drop(&mut self) {
-            self.0.store(false, Ordering::Release);
-        }
-    }
-
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let target = url.clone();
-    let host = target.host_str().unwrap_or_default().to_owned();
-    let port = target.port_or_known_default();
-    let scheme = target.scheme().to_owned();
-    let started = std::time::Instant::now();
-    let worker_started = started;
-    debug!(host, port, scheme, "Windows system proxy worker started");
-    std::thread::spawn(move || {
-        let _guard = ResolverGuard(busy);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            resolve_system_blocking(&target)
-        }))
-        .unwrap_or_else(|_| {
-            Err(anyhow::anyhow!(
-                "Windows system proxy resolver worker panicked"
-            ))
-        });
-        let _ = sender.send(result);
-        debug!(
-            host = target.host_str().unwrap_or_default(),
-            port = target.port_or_known_default(),
-            scheme = target.scheme(),
-            elapsed_ms = worker_started.elapsed().as_millis() as u64,
-            "Windows system proxy worker exited"
-        );
-    });
-
-    match receiver.recv_timeout(std::time::Duration::from_secs(15)) {
-        Ok(result) => result,
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            warn!(
-                host,
-                port,
-                scheme,
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                "Windows system proxy worker caller timed out"
-            );
-            Err(anyhow::anyhow!(
-                "Windows system proxy resolution timed out after 15 seconds"
-            ))
-        }
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(anyhow::anyhow!(
-            "Windows system proxy resolver worker exited without a result"
-        )),
-    }
-}
-
-#[cfg(windows)]
-fn resolve_system_blocking(url: &Url) -> Result<ProxyRoute> {
-    use windows::core::{BOOL, PCWSTR, PWSTR};
-    use windows::Win32::Foundation::{GlobalFree, HGLOBAL};
-    use windows::Win32::Networking::WinHttp::*;
-
-    fn wide(s: &str) -> Vec<u16> {
-        s.encode_utf16().chain(Some(0)).collect()
-    }
-    unsafe fn take(p: PWSTR) -> Option<String> {
-        if p.is_null() {
-            return None;
-        }
-        let mut n = 0;
-        while *p.0.add(n) != 0 {
-            n += 1;
-        }
-        Some(String::from_utf16_lossy(std::slice::from_raw_parts(p.0, n)))
-    }
-    unsafe fn free(p: PWSTR) {
-        if !p.is_null() {
-            let _ = GlobalFree(Some(HGLOBAL(p.0.cast())));
-        }
-    }
-
-    let mut ie = WINHTTP_CURRENT_USER_IE_PROXY_CONFIG::default();
-    unsafe {
-        WinHttpGetIEProxyConfigForCurrentUser(&mut ie)
-            .map_err(|e| anyhow::anyhow!("Windows proxy configuration unavailable ({e})"))?;
-    }
-    let proxy = unsafe { take(ie.lpszProxy) };
-    let bypass = unsafe { take(ie.lpszProxyBypass) };
-    let pac = unsafe { take(ie.lpszAutoConfigUrl) };
-    let auto_detect = ie.fAutoDetect.as_bool();
-    let pac_configured = pac.is_some();
-    let static_proxy_configured = proxy.is_some();
-    let started = std::time::Instant::now();
-    debug!(
-        host = url.host_str().unwrap_or_default(),
-        port = url.port_or_known_default(),
-        scheme = url.scheme(),
-        auto_detect,
-        pac_configured,
-        static_proxy_configured,
-        "Windows system proxy resolver started"
-    );
-    let result = (|| -> Result<ProxyRoute> {
-        if windows_bypass_matches(url, bypass.as_deref()) {
-            return Ok(ProxyRoute::Direct);
-        }
-        let mut info = WINHTTP_PROXY_INFO::default();
-        if ie.fAutoDetect.as_bool() || pac.is_some() {
-            let session = unsafe {
-                WinHttpOpen(
-                    PCWSTR::null(),
-                    WINHTTP_ACCESS_TYPE_NO_PROXY,
-                    PCWSTR::null(),
-                    PCWSTR::null(),
-                    0,
-                )
-            };
-            if session.is_null() {
-                anyhow::bail!("Windows proxy resolver unavailable");
-            }
-            if let Err(error) = unsafe { WinHttpSetTimeouts(session, 5000, 5000, 5000, 10000) } {
-                unsafe {
-                    let _ = WinHttpCloseHandle(session);
-                }
-                anyhow::bail!("Windows system resolver configuration error: {error}");
-            }
-            let mut opts = WINHTTP_AUTOPROXY_OPTIONS::default();
-            opts.dwFlags = if auto_detect {
-                WINHTTP_AUTOPROXY_AUTO_DETECT
-                    | if pac_configured {
-                        WINHTTP_AUTOPROXY_CONFIG_URL
-                    } else {
-                        0
-                    }
-            } else {
-                WINHTTP_AUTOPROXY_CONFIG_URL
-            };
-            opts.dwAutoDetectFlags = if auto_detect {
-                WINHTTP_AUTO_DETECT_TYPE_DHCP | WINHTTP_AUTO_DETECT_TYPE_DNS_A
-            } else {
-                0
-            };
-            let pac_wide = pac.as_deref().map(wide);
-            opts.lpszAutoConfigUrl = pac_wide
-                .as_ref()
-                .map_or(PCWSTR::null(), |v| PCWSTR(v.as_ptr()));
-            opts.fAutoLogonIfChallenged = BOOL(1);
-            let target = wide(url.as_str());
-            let resolved = unsafe {
-                WinHttpGetProxyForUrl(session, PCWSTR(target.as_ptr()), &mut opts, &mut info)
-            };
-            unsafe {
-                let _ = WinHttpCloseHandle(session);
-            }
-            resolved.map_err(|error| {
-                anyhow::anyhow!("Windows system proxy resolution failed: {error}")
-            })?;
-            let selected = unsafe { take(info.lpszProxy) };
-            unsafe {
-                free(info.lpszProxy);
-                free(info.lpszProxyBypass);
-            }
-            return Ok(parse_windows_proxy(url, selected.as_deref()).unwrap_or(ProxyRoute::Direct));
-        }
-        Ok(parse_windows_proxy(url, proxy.as_deref()).unwrap_or(ProxyRoute::Direct))
-    })();
-    unsafe {
-        free(ie.lpszAutoConfigUrl);
-        free(ie.lpszProxy);
-        free(ie.lpszProxyBypass);
-    }
-    match &result {
-        Ok(route) => info!(
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            route = route_kind(route),
-            "Windows system proxy resolver finished"
-        ),
-        Err(error) => {
-            warn!(elapsed_ms = started.elapsed().as_millis() as u64, error = %error, "Windows system proxy resolver failed")
-        }
-    }
-    result
-}
-
-#[cfg(windows)]
-fn windows_bypass_matches(url: &Url, bypass: Option<&str>) -> bool {
-    let Some(bypass) = bypass else {
-        return false;
-    };
-    bypass
-        .split(';')
-        .flat_map(|s| s.split_whitespace())
-        .any(|pattern| {
-            if pattern.eq_ignore_ascii_case("<local>") {
-                return url.host_str().is_some_and(|h| !h.contains('.'));
-            }
-            no_proxy_matches(
-                url.host_str().unwrap_or_default(),
-                url.port_or_known_default(),
-                &[pattern.to_owned()],
-            )
-        })
+fn resolve_system(_url: &Url) -> Result<ProxyRoute> {
+    // Keep System as a transport decision. Resolving here would turn a
+    // system result into Direct or Explicit, causing callers to use reqwest
+    // instead of WinHTTP and potentially bypass the Windows proxy policy.
+    Ok(ProxyRoute::System)
 }
 
 #[cfg(not(windows))]
@@ -444,10 +238,13 @@ fn resolve_system(_url: &Url) -> Result<ProxyRoute> {
     anyhow::bail!("Windows system proxy is unsupported on this platform")
 }
 
-fn parse_windows_proxy(url: &Url, value: Option<&str>) -> Option<ProxyRoute> {
-    let value = value?.trim();
+fn parse_windows_proxy(url: &Url, value: Option<&str>) -> Result<ProxyRoute> {
+    let value = value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("Windows system proxy settings contain no usable route"))?;
     if value.eq_ignore_ascii_case("DIRECT") || value.is_empty() {
-        return Some(ProxyRoute::Direct);
+        return Ok(ProxyRoute::Direct);
     }
     let wanted = match url.scheme() {
         "https" | "wss" => ["https", "http", "socks"],
@@ -495,21 +292,16 @@ fn parse_windows_proxy(url: &Url, value: Option<&str>) -> Option<ProxyRoute> {
             .and_then(|p| p.host_str().map(|_| ()))
             .is_some()
         {
-            return Some(ProxyRoute::Explicit {
+            return Ok(ProxyRoute::Explicit {
                 url: normalized,
                 credentials: None,
             });
         }
     }
-    Some(ProxyRoute::Direct)
-}
-
-fn route_kind(route: &ProxyRoute) -> &'static str {
-    match route {
-        ProxyRoute::Direct => "direct",
-        ProxyRoute::System => "system",
-        ProxyRoute::Explicit { .. } => "explicit",
-    }
+    Err(anyhow::anyhow!(
+        "could not parse Windows proxy settings for {}",
+        url.scheme()
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -750,31 +542,31 @@ mod tests {
         let https = Url::parse("https://example.test").unwrap();
         assert!(matches!(
             parse_windows_proxy(&https, Some("DIRECT")),
-            Some(ProxyRoute::Direct)
+            Ok(ProxyRoute::Direct)
         ));
         assert!(matches!(
             parse_windows_proxy(&https, Some("http=proxy:8080; https=secure:8443")),
-            Some(ProxyRoute::Explicit { url, .. }) if url == "https://secure:8443"
+            Ok(ProxyRoute::Explicit { url, .. }) if url == "https://secure:8443"
         ));
         assert!(matches!(
             parse_windows_proxy(&https, Some("socks=socks:1080")),
-            Some(ProxyRoute::Explicit { url, .. }) if url == "socks5://socks:1080"
+            Ok(ProxyRoute::Explicit { url, .. }) if url == "socks5://socks:1080"
         ));
         assert!(matches!(
             parse_windows_proxy(&https, Some("PROXY proxy:3129; DIRECT")),
-            Some(ProxyRoute::Explicit { url, .. }) if url == "http://proxy:3129"
+            Ok(ProxyRoute::Explicit { url, .. }) if url == "http://proxy:3129"
         ));
         assert!(matches!(
             parse_windows_proxy(&https, Some("HTTPS proxy:8443; DIRECT")),
-            Some(ProxyRoute::Explicit { url, .. }) if url == "https://proxy:8443"
+            Ok(ProxyRoute::Explicit { url, .. }) if url == "https://proxy:8443"
         ));
         assert!(matches!(
             parse_windows_proxy(&https, Some("SOCKS proxy:1080; DIRECT")),
-            Some(ProxyRoute::Explicit { url, .. }) if url == "socks5://proxy:1080"
+            Ok(ProxyRoute::Explicit { url, .. }) if url == "socks5://proxy:1080"
         ));
         assert!(matches!(
             parse_windows_proxy(&https, Some("DIRECT")),
-            Some(ProxyRoute::Direct)
+            Ok(ProxyRoute::Direct)
         ));
     }
     #[test]
@@ -812,5 +604,40 @@ mod tests {
             Some(80),
             &["2001:db8::/64".into()]
         ));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn application_no_proxy_preserves_system_route() {
+        assert_eq!(
+            select_route(
+                Some(ProxyRoute::System),
+                &["internal.example".into()],
+                &Url::parse("https://internal.example/api").unwrap(),
+            )
+            .unwrap(),
+            ProxyRoute::System
+        );
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn system_route_is_explicitly_unsupported() {
+        let error = select_route(
+            Some(ProxyRoute::System),
+            &[],
+            &Url::parse("https://example.test").unwrap(),
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Windows system proxy is unsupported"));
+    }
+
+    #[test]
+    fn malformed_system_proxy_is_not_treated_as_direct() {
+        let url = Url::parse("https://example.test").unwrap();
+        let error = parse_windows_proxy(&url, Some("HTTPS not a valid proxy")).unwrap_err();
+        assert!(error.to_string().contains("could not parse Windows proxy"));
     }
 }

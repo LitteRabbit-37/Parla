@@ -21,9 +21,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use crate::enhancement::provider::{
-    EnhancementRequest, EnhancementResponse, LLMProvider,
-};
+use crate::enhancement::provider::{EnhancementRequest, EnhancementResponse, LLMProvider};
 
 pub struct AnthropicProvider;
 
@@ -69,7 +67,8 @@ impl LLMProvider for AnthropicProvider {
             "temperature": req.temperature,
         });
 
-        let client = reqwest::Client::builder()
+        let url = reqwest::Url::parse(self.endpoint())?;
+        let client = crate::services::proxy::apply_for_url(reqwest::Client::builder(), &url)?
             .timeout(req.timeout)
             .build()
             .map_err(|e| anyhow!("http client: {e}"))?;

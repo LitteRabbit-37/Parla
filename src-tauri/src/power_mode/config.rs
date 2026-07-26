@@ -139,9 +139,7 @@ impl PowerModeConfig {
 // -- Persistance ------------------------------------------------------------
 
 pub fn load_all(app: &AppHandle) -> Result<Vec<PowerModeConfig>> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| anyhow!("store: {e}"))?;
+    let store = app.store(STORE_FILE).map_err(|e| anyhow!("store: {e}"))?;
     if let Some(v) = store.get(KEY_CONFIGS) {
         if let Ok(list) = serde_json::from_value::<Vec<PowerModeConfig>>(v) {
             return Ok(list);
@@ -151,17 +149,13 @@ pub fn load_all(app: &AppHandle) -> Result<Vec<PowerModeConfig>> {
 }
 
 pub fn save_all(app: &AppHandle, list: &[PowerModeConfig]) -> Result<()> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| anyhow!("store: {e}"))?;
+    let store = app.store(STORE_FILE).map_err(|e| anyhow!("store: {e}"))?;
     store.set(KEY_CONFIGS, serde_json::to_value(list)?);
     store.save().map_err(|e| anyhow!("store save: {e}"))
 }
 
 pub fn set_active_id(app: &AppHandle, id: Option<&str>) -> Result<()> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| anyhow!("store: {e}"))?;
+    let store = app.store(STORE_FILE).map_err(|e| anyhow!("store: {e}"))?;
     match id {
         Some(i) => store.set(KEY_ACTIVE_ID, serde_json::Value::String(i.into())),
         None => {
@@ -179,9 +173,7 @@ pub fn is_auto_restore(app: &AppHandle) -> bool {
 }
 
 pub fn set_auto_restore(app: &AppHandle, enabled: bool) -> Result<()> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| anyhow!("store: {e}"))?;
+    let store = app.store(STORE_FILE).map_err(|e| anyhow!("store: {e}"))?;
     store.set(KEY_AUTO_RESTORE, serde_json::Value::Bool(enabled));
     store.save().map_err(|e| anyhow!("store save: {e}"))
 }

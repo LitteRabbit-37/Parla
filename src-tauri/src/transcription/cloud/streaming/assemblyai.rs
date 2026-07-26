@@ -61,9 +61,7 @@ impl StreamingProvider for AssemblyAiStreaming {
             .map_err(|e| anyhow!("ws url parse: {e}"))?;
         req.headers_mut().insert(
             "Authorization",
-            api_key
-                .parse()
-                .map_err(|e| anyhow!("auth header: {e}"))?,
+            api_key.parse().map_err(|e| anyhow!("auth header: {e}"))?,
         );
 
         let ws_stream = connect_ws(req).await?;
@@ -278,11 +276,7 @@ struct AaiState {
     last_committed_turn: Option<i64>,
 }
 
-fn handle_text(
-    t: &str,
-    state: &mut AaiState,
-    on_event: &(dyn Fn(StreamingEvent) + Send + Sync),
-) {
+fn handle_text(t: &str, state: &mut AaiState, on_event: &(dyn Fn(StreamingEvent) + Send + Sync)) {
     let Ok(json) = serde_json::from_str::<Value>(t) else {
         return;
     };
@@ -395,7 +389,10 @@ mod tests {
             cb.as_ref(),
         );
         let events = acc.lock().unwrap().clone();
-        assert!(matches!(events.first(), Some(StreamingEvent::Partial { .. })));
+        assert!(matches!(
+            events.first(),
+            Some(StreamingEvent::Partial { .. })
+        ));
         match events.last().unwrap() {
             StreamingEvent::Committed { text } => assert_eq!(text, "hello world"),
             other => panic!("expected Committed, got {:?}", other),

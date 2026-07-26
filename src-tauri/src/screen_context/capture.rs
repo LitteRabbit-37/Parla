@@ -31,13 +31,12 @@ pub fn capture_foreground(active: &ActiveWindow) -> Result<CaptureResult> {
     let target = windows
         .iter()
         .find(|w| {
-            !w.is_minimized().unwrap_or(true)
-                && w.pid().map(|p| p == active.pid).unwrap_or(false)
+            !w.is_minimized().unwrap_or(true) && w.pid().map(|p| p == active.pid).unwrap_or(false)
         })
         .or_else(|| {
-            windows
-                .iter()
-                .find(|w| !w.is_minimized().unwrap_or(true) && w.title().unwrap_or_default() == active.title)
+            windows.iter().find(|w| {
+                !w.is_minimized().unwrap_or(true) && w.title().unwrap_or_default() == active.title
+            })
         })
         .or_else(|| windows.iter().find(|w| !w.is_minimized().unwrap_or(true)))
         .ok_or_else(|| anyhow!("aucune fenetre capturable"))?;

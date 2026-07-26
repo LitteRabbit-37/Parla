@@ -28,7 +28,10 @@ pub async fn vad_download(app: AppHandle) -> Result<String, String> {
         Ok(path) => Ok(path.to_string_lossy().into_owned()),
         Err(error) => {
             let message = crate::services::download::diagnostic(&error);
-            let _ = app.emit("vad:download:error", serde_json::json!({ "message": message }));
+            let _ = app.emit(
+                "vad:download:error",
+                serde_json::json!({ "message": message }),
+            );
             Err(message)
         }
     }

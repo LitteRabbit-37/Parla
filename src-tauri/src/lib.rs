@@ -24,33 +24,14 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, Manager};
 use tracing::{info, warn};
+use tracing_subscriber::prelude::*;
 
-use commands::dictionary::{
-    add_word_replacement, delete_word_replacement, list_word_replacements, update_word_replacement,
-};
-use commands::models::{
-    cancel_download_whisper_model, delete_whisper_model, download_whisper_model,
-    import_whisper_model, list_whisper_models, ModelManagerState,
-};
-use commands::recording::{
-    cancel_recording, get_audio_meter, is_recording, list_audio_devices, start_recording,
-    stop_recording, RecorderState,
-};
-use commands::streaming::{StreamingRegistryState, StreamingSessionState};
-use commands::settings::{
-    close_to_tray_enabled, get_audio_resumption_delay, get_close_to_tray,
-    get_dictation_language, get_selected_whisper_model, get_sound_feedback_enabled,
-    get_system_mute_enabled, get_text_processing_settings, get_transcription_source,
-    set_append_trailing_space, set_audio_resumption_delay, set_close_to_tray,
-    set_dictation_language, set_filler_words, set_remove_filler_words,
-    set_restore_clipboard_after_paste, set_selected_whisper_model, set_sound_feedback_enabled,
-    set_system_mute_enabled, set_text_formatting_enabled, set_transcription_kind,
-    set_transcription_source,
-};
-use commands::transcription::{transcribe_wav, WhisperEngineState};
 use commands::cloud::{
     cloud_transcribe_wav, delete_api_key, has_api_key, list_cloud_models, list_cloud_providers,
     set_api_key, verify_api_key, CloudRegistryState,
+};
+use commands::dictionary::{
+    add_word_replacement, delete_word_replacement, list_word_replacements, update_word_replacement,
 };
 use commands::enhancement::{
     add_prompt, delete_prompt, get_active_prompt_id, get_custom_base_url, get_enhancement_enabled,
@@ -59,10 +40,23 @@ use commands::enhancement::{
     set_active_prompt_id, set_custom_base_url, set_enhancement_enabled, set_llm_selection,
     set_localcli_custom_cmd, set_localcli_timeout_secs, set_ollama_base_url, update_prompt,
 };
+use commands::history::{
+    count_history, delete_history_item, export_history_csv, get_history_item,
+    get_retention_settings, list_history, run_history_cleanup, set_retention_settings,
+};
+use commands::hotkey::{
+    get_hotkey_config, list_hotkey_options, reset_hotkey_config, set_hotkey_config,
+    HotkeyManagerState,
+};
 use commands::llm_models::{
     cancel_download_gguf_model, delete_gguf_model, download_gguf_model, get_llamacpp_settings,
     get_selected_gguf, import_gguf_model, list_gguf_models, llamacpp_cuda_enabled,
     set_llamacpp_settings, set_selected_gguf,
+};
+use commands::metrics::get_model_performance_metrics;
+use commands::models::{
+    cancel_download_whisper_model, delete_whisper_model, download_whisper_model,
+    import_whisper_model, list_whisper_models, ModelManagerState,
 };
 use commands::parakeet::{
     cancel_download_parakeet_model, delete_parakeet_model, download_parakeet_model,
@@ -77,22 +71,30 @@ use commands::power_mode::{
     list_power_configs, power_mode_preview, reorder_power_configs, set_power_auto_restore,
     update_power_config,
 };
-use commands::history::{
-    count_history, delete_history_item, export_history_csv, get_history_item,
-    get_retention_settings, list_history, run_history_cleanup, set_retention_settings,
+use commands::recording::{
+    cancel_recording, get_audio_meter, is_recording, list_audio_devices, start_recording,
+    stop_recording, RecorderState,
 };
-use commands::metrics::get_model_performance_metrics;
 use commands::screen_context::{
     capture_screen_context_preview, clear_screen_context, get_screen_context_cached,
     get_screen_context_enabled, set_screen_context_enabled,
 };
+use commands::settings::{
+    close_to_tray_enabled, delete_proxy_credentials, get_audio_resumption_delay, get_close_to_tray,
+    get_dictation_language, get_proxy_settings, get_selected_whisper_model,
+    get_sound_feedback_enabled, get_system_mute_enabled, get_text_processing_settings,
+    get_transcription_source, has_proxy_credentials, set_append_trailing_space,
+    set_audio_resumption_delay, set_close_to_tray, set_dictation_language, set_filler_words,
+    set_proxy_credentials, set_proxy_settings, set_remove_filler_words,
+    set_restore_clipboard_after_paste, set_selected_whisper_model, set_sound_feedback_enabled,
+    set_system_mute_enabled, set_text_formatting_enabled, set_transcription_kind,
+    set_transcription_source,
+};
+use commands::streaming::{StreamingRegistryState, StreamingSessionState};
+use commands::transcription::{transcribe_wav, WhisperEngineState};
 use commands::vad::{
     vad_delete, vad_download, vad_get_state, vad_is_enabled, vad_is_ready, vad_set_enabled,
     VadEngineState,
-};
-use commands::hotkey::{
-    get_hotkey_config, list_hotkey_options, reset_hotkey_config, set_hotkey_config,
-    HotkeyManagerState,
 };
 use hotkeys::{
     keyboard_hook::install_hook,
@@ -120,25 +122,6 @@ fn ping() -> &'static str {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,parla=debug")),
-        )
-        .init();
-
-    let gpu = gpu::detect();
-    if gpu.has_nvidia {
-        info!(
-            device = gpu.device_name.as_deref().unwrap_or("?"),
-            driver = gpu.driver_version.as_deref().unwrap_or("?"),
-            cuda = gpu.cuda_version.as_deref().unwrap_or("?"),
-            "GPU NVIDIA detecte"
-        );
-    } else {
-        warn!("Pas de GPU NVIDIA detecte, execution CPU uniquement");
-    }
-
     tauri::Builder::default()
         // Single-instance guard. If the user double-clicks the exe or an
         // autostart entry fires a second time while Parla is already
@@ -185,6 +168,22 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(move |app| {
+            configure_tracing(app.handle());
+            let gpu = gpu::detect();
+            if gpu.has_nvidia {
+                info!(
+                    device = gpu.device_name.as_deref().unwrap_or("?"),
+                    driver = gpu.driver_version.as_deref().unwrap_or("?"),
+                    cuda = gpu.cuda_version.as_deref().unwrap_or("?"),
+                    "GPU NVIDIA detecte"
+                );
+            } else {
+                warn!("Pas de GPU NVIDIA detecte, execution CPU uniquement");
+            }
+
+            if let Err(e) = services::proxy::configure(app.handle()) {
+                warn!("Application proxy unavailable: {e}");
+            }
             let handle = app.handle().clone();
             app.manage(ModelManagerState::new(handle.clone()));
             app.manage(enhancement::model_manager::GgufModelManagerState::new(
@@ -323,6 +322,11 @@ pub fn run() {
             vad_is_enabled,
             vad_set_enabled,
             vad_is_ready,
+            get_proxy_settings,
+            set_proxy_settings,
+            set_proxy_credentials,
+            delete_proxy_credentials,
+            has_proxy_credentials,
             list_cloud_providers,
             list_cloud_models,
             set_api_key,
@@ -407,6 +411,45 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn configure_tracing(app: &tauri::AppHandle) {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,parla=debug"));
+
+    #[cfg(windows)]
+    {
+        if let Ok(log_dir) = app
+            .path()
+            .app_local_data_dir()
+            .map(|path| path.join("logs"))
+        {
+            if let Err(error) = std::fs::create_dir_all(&log_dir) {
+                eprintln!(
+                    "Unable to create Parla log directory {}: {error}",
+                    log_dir.display()
+                );
+            } else {
+                let (file_writer, guard) = tracing_appender::non_blocking(
+                    tracing_appender::rolling::daily(&log_dir, "parla.log"),
+                );
+                // Keep the worker alive for process lifetime; dropping it stops file logging.
+                let _ = Box::leak(Box::new(guard));
+                let _ = tracing_subscriber::registry()
+                    .with(filter.clone())
+                    .with(tracing_subscriber::fmt::layer())
+                    .with(tracing_subscriber::fmt::layer().with_writer(file_writer))
+                    .try_init();
+                info!(
+                    path = %log_dir.display(),
+                    "Durable tracing log enabled"
+                );
+                return;
+            }
+        }
+    }
+
+    let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
 }
 
 fn setup_hotkeys(app: AppHandle) {

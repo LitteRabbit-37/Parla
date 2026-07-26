@@ -51,9 +51,7 @@ pub fn is_enabled(app: &AppHandle) -> bool {
 }
 
 pub fn set_enabled(app: &AppHandle, enabled: bool) -> Result<()> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| anyhow!("store: {e}"))?;
+    let store = app.store(STORE_FILE).map_err(|e| anyhow!("store: {e}"))?;
     store.set(KEY_ENABLED, serde_json::Value::Bool(enabled));
     store.save().map_err(|e| anyhow!("store save: {e}"))
 }
@@ -70,9 +68,7 @@ pub fn resumption_delay(app: &AppHandle) -> Duration {
 
 pub fn set_resumption_delay(app: &AppHandle, secs: f64) -> Result<()> {
     let clamped = secs.clamp(0.0, 10.0);
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| anyhow!("store: {e}"))?;
+    let store = app.store(STORE_FILE).map_err(|e| anyhow!("store: {e}"))?;
     store.set(
         KEY_DELAY,
         serde_json::Value::Number(
@@ -254,16 +250,15 @@ mod windows_audio {
                 .Activate(CLSCTX_ALL, None)
                 .map_err(|e| anyhow!("IMMDevice::Activate: {e}"))?
         };
-        Ok(volume.cast().map_err(|e| anyhow!("cast IAudioEndpointVolume: {e}"))?)
+        Ok(volume
+            .cast()
+            .map_err(|e| anyhow!("cast IAudioEndpointVolume: {e}"))?)
     }
 
     pub fn read_mute() -> Result<bool> {
         let _com = ComGuard::new()?;
         let vol = endpoint_volume()?;
-        let muted = unsafe {
-            vol.GetMute()
-                .map_err(|e| anyhow!("GetMute: {e}"))?
-        };
+        let muted = unsafe { vol.GetMute().map_err(|e| anyhow!("GetMute: {e}"))? };
         Ok(muted.as_bool())
     }
 

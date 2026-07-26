@@ -29,7 +29,7 @@ impl CloudTranscriptionProvider for GroqProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client()?;
+        let client = batch_client("https://api.groq.com/openai/v1/models")?;
         let resp = client
             .get("https://api.groq.com/openai/v1/models")
             .bearer_auth(api_key)
@@ -65,7 +65,7 @@ impl CloudTranscriptionProvider for GroqProvider {
             }
         }
 
-        let client = batch_client()?;
+        let client = batch_client("https://api.groq.com/openai/v1/audio/transcriptions")?;
         let resp = client
             .post("https://api.groq.com/openai/v1/audio/transcriptions")
             .bearer_auth(api_key)
@@ -83,9 +83,7 @@ impl CloudTranscriptionProvider for GroqProvider {
 
         // Fallback : si le JSON ne decode pas, essayer le body brut en UTF-8.
         match serde_json::from_slice::<GroqResponse>(&body) {
-            Ok(r) => r
-                .text
-                .ok_or_else(|| anyhow!("reponse sans champ text")),
+            Ok(r) => r.text.ok_or_else(|| anyhow!("reponse sans champ text")),
             Err(_) => Ok(String::from_utf8_lossy(&body).trim().to_string()),
         }
     }

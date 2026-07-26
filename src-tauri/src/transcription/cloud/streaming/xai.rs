@@ -153,11 +153,7 @@ struct XaiState {
     locked: String,
 }
 
-fn handle_text(
-    t: &str,
-    state: &mut XaiState,
-    on_event: &(dyn Fn(StreamingEvent) + Send + Sync),
-) {
+fn handle_text(t: &str, state: &mut XaiState, on_event: &(dyn Fn(StreamingEvent) + Send + Sync)) {
     let Ok(json) = serde_json::from_str::<Value>(t) else {
         return;
     };

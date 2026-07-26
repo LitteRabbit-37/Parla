@@ -6,7 +6,9 @@
 // Pour la voix cela reste suffisamment rapide en temps reel.
 
 use anyhow::{anyhow, Result};
-use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
+use rubato::{
+    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+};
 
 use super::TARGET_SAMPLE_RATE;
 

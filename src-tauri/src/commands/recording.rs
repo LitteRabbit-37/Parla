@@ -64,10 +64,7 @@ pub fn stop_recording(
 }
 
 #[tauri::command]
-pub fn cancel_recording(
-    app: AppHandle,
-    state: State<'_, RecorderState>,
-) -> Result<(), String> {
+pub fn cancel_recording(app: AppHandle, state: State<'_, RecorderState>) -> Result<(), String> {
     cancel_recording_core(&app, &state).map_err(|e| e.to_string())
 }
 
@@ -162,10 +159,7 @@ pub fn stop_recording_core(
     Ok(stopped)
 }
 
-pub fn cancel_recording_core(
-    app: &AppHandle,
-    state: &RecorderState,
-) -> anyhow::Result<()> {
+pub fn cancel_recording_core(app: &AppHandle, state: &RecorderState) -> anyhow::Result<()> {
     let mut guard = state.0.lock();
     let Some(handle) = guard.take() else {
         return Ok(());
@@ -173,7 +167,10 @@ pub fn cancel_recording_core(
     drop(guard);
     let path = handle.stop()?;
     if let Err(e) = std::fs::remove_file(&path) {
-        warn!("Impossible de supprimer l'enregistrement annule {}: {e}", path.display());
+        warn!(
+            "Impossible de supprimer l'enregistrement annule {}: {e}",
+            path.display()
+        );
     }
     info!(path = %path.display(), "Enregistrement annule");
     // Cancel / ESC cue (VoiceInk SoundManager.playEscSound). Only when there

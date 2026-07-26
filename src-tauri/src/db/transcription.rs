@@ -237,9 +237,8 @@ pub fn list_page(
             }
         }
         (None, None) => {
-            let mut stmt = conn.prepare(
-                "SELECT * FROM transcriptions ORDER BY timestamp DESC LIMIT ?1",
-            )?;
+            let mut stmt =
+                conn.prepare("SELECT * FROM transcriptions ORDER BY timestamp DESC LIMIT ?1")?;
             let mut rows = stmt.query(params![limit])?;
             while let Some(row) = rows.next()? {
                 push(row)?;
@@ -342,8 +341,7 @@ pub fn aggregate_transcription_metrics(
         stmt.query_map(params![c], map)?
             .collect::<rusqlite::Result<_>>()?
     } else {
-        stmt.query_map([], map)?
-            .collect::<rusqlite::Result<_>>()?
+        stmt.query_map([], map)?.collect::<rusqlite::Result<_>>()?
     };
     Ok(rows)
 }
@@ -385,18 +383,14 @@ pub fn aggregate_enhancement_metrics(
         stmt.query_map(params![c], map)?
             .collect::<rusqlite::Result<_>>()?
     } else {
-        stmt.query_map([], map)?
-            .collect::<rusqlite::Result<_>>()?
+        stmt.query_map([], map)?.collect::<rusqlite::Result<_>>()?
     };
     Ok(rows)
 }
 
 /// Supprime les transcriptions plus vieilles que `older_than`. Renvoie
 /// les audio_file_name supprimees (pour purge des WAV).
-pub fn delete_older_than(
-    conn: &Connection,
-    older_than: DateTime<Utc>,
-) -> Result<Vec<String>> {
+pub fn delete_older_than(conn: &Connection, older_than: DateTime<Utc>) -> Result<Vec<String>> {
     let ts = older_than.to_rfc3339();
     let mut stmt = conn.prepare(
         "SELECT audio_file_name FROM transcriptions
@@ -416,10 +410,7 @@ pub fn delete_older_than(
 
 /// Efface uniquement le audio_file_name des lignes plus vieilles que
 /// `older_than` (pour le mode audio-only cleanup, aligne VoiceInk).
-pub fn clear_audio_older_than(
-    conn: &Connection,
-    older_than: DateTime<Utc>,
-) -> Result<Vec<String>> {
+pub fn clear_audio_older_than(conn: &Connection, older_than: DateTime<Utc>) -> Result<Vec<String>> {
     let ts = older_than.to_rfc3339();
     let mut stmt = conn.prepare(
         "SELECT audio_file_name FROM transcriptions
@@ -440,9 +431,8 @@ pub fn clear_audio_older_than(
 
 /// Liste tous les audio_file_name references (pour l'orphan sweep).
 pub fn all_audio_file_names(conn: &Connection) -> Result<Vec<String>> {
-    let mut stmt = conn.prepare(
-        "SELECT audio_file_name FROM transcriptions WHERE audio_file_name IS NOT NULL",
-    )?;
+    let mut stmt = conn
+        .prepare("SELECT audio_file_name FROM transcriptions WHERE audio_file_name IS NOT NULL")?;
     let out: Vec<String> = stmt
         .query_map([], |r| r.get::<_, Option<String>>(0))?
         .filter_map(|r| r.ok().flatten())

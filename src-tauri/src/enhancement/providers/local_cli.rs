@@ -27,9 +27,7 @@ use tauri_plugin_store::StoreExt;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-use crate::enhancement::provider::{
-    EnhancementRequest, EnhancementResponse, LLMProvider,
-};
+use crate::enhancement::provider::{EnhancementRequest, EnhancementResponse, LLMProvider};
 
 pub struct LocalCLIProvider;
 
@@ -43,7 +41,10 @@ const TEMPLATES: &[&str] = &["pi", "claude", "codex", "custom"];
 pub fn get_custom_cmd(app: &AppHandle) -> Option<String> {
     app.store(STORE_FILE)
         .ok()
-        .and_then(|s| s.get(KEY_CUSTOM_CMD).and_then(|v| v.as_str().map(String::from)))
+        .and_then(|s| {
+            s.get(KEY_CUSTOM_CMD)
+                .and_then(|v| v.as_str().map(String::from))
+        })
         .filter(|s| !s.is_empty())
 }
 
@@ -99,9 +100,7 @@ fn template_script(template: &str, custom_cmd: Option<&str>) -> Result<String> {
 }
 
 fn full_prompt(system: &str, user: &str) -> String {
-    format!(
-        "<SYSTEM_PROMPT>\n{system}\n</SYSTEM_PROMPT>\n\n<USER_PROMPT>\n{user}\n</USER_PROMPT>"
-    )
+    format!("<SYSTEM_PROMPT>\n{system}\n</SYSTEM_PROMPT>\n\n<USER_PROMPT>\n{user}\n</USER_PROMPT>")
 }
 
 #[async_trait]

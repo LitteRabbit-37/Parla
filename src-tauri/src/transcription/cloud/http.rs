@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use reqwest::multipart::Part;
+use url::Url;
 
 /// Timeout total pour une requete batch (upload + traitement cote provider).
 /// 120s est large : Whisper large sur 30min d'audio prend ~30-60s cote cloud.
@@ -20,8 +21,9 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Client reqwest pre-configure pour les providers batch cloud.
 /// A utiliser partout a la place de `reqwest::Client::new()`.
-pub fn batch_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
+pub fn batch_client(endpoint: &str) -> Result<reqwest::Client> {
+    let url = Url::parse(endpoint).map_err(|e| anyhow!("http endpoint: {e}"))?;
+    crate::services::proxy::apply_for_url(reqwest::Client::builder(), &url)?
         .timeout(BATCH_TIMEOUT)
         .connect_timeout(CONNECT_TIMEOUT)
         .build()

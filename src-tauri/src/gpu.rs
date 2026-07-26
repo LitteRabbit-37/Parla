@@ -9,10 +9,7 @@ use tracing::debug;
 pub fn detect() -> GpuInfo {
     match nvml_wrapper::Nvml::init() {
         Ok(nvml) => {
-            let device_name = nvml
-                .device_by_index(0)
-                .and_then(|d| d.name())
-                .ok();
+            let device_name = nvml.device_by_index(0).and_then(|d| d.name()).ok();
             let driver_version = nvml.sys_driver_version().ok();
             let cuda_version = nvml
                 .sys_cuda_driver_version()

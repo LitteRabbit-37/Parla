@@ -4,7 +4,7 @@ use anyhow::Error;
 pub fn diagnostic(error: &Error) -> String {
     let mut messages = Vec::new();
     for cause in error.chain() {
-        let message = sanitize(&cause.to_string());
+        let message = sanitize_message(&cause.to_string());
         if !message.is_empty() && messages.last() != Some(&message) {
             messages.push(message);
         }
@@ -12,7 +12,9 @@ pub fn diagnostic(error: &Error) -> String {
     messages.join("; ")
 }
 
-fn sanitize(message: &str) -> String {
+/// Redact URLs, URL userinfo, query strings, and credential-like values from
+/// diagnostics before they reach logs or the frontend.
+pub(crate) fn sanitize_message(message: &str) -> String {
     let mut sanitized = message.to_string();
     let mut search_from = 0;
     while let Some(relative) = sanitized[search_from..].find("://") {
@@ -116,20 +118,33 @@ fn redact_credential_values(message: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize;
+    use super::sanitize_message;
 
     #[test]
     fn sanitizes_arbitrary_scheme_userinfo_and_query() {
-        let result = sanitize("request socks5://user:pass@example.test/path?token=secret&x=y");
+        let result =
+            sanitize_message("request socks5://user:pass@example.test/path?token=secret&x=y");
         assert_eq!(result, "request socks5://example.test/path");
     }
 
     #[test]
     fn redacts_credential_keys_case_insensitively() {
-        let result = sanitize("PASSWORD=one; Access_Token: two, Authorization: Bearer three");
+        let result =
+            sanitize_message("PASSWORD=one; Access_Token: two, Authorization: Bearer three");
         assert_eq!(
             result,
             "PASSWORD=[redacted]; Access_Token: [redacted], Authorization: Bearer [redacted]"
+        );
+    }
+
+    #[test]
+    fn redacts_proxy_and_pac_urls() {
+        let result = sanitize_message(
+            "PAC https://user:pass@pac.example/config.pac?token=secret; proxy=http://u:p@proxy.example:8080",
+        );
+        assert_eq!(
+            result,
+            "PAC https://pac.example/config.pac; proxy=http://proxy.example:8080"
         );
     }
 }

@@ -39,10 +39,7 @@ pub async fn chat_completion(
             {"role": "user", "content": req.user_message},
         ]),
     );
-    body.insert(
-        "temperature".into(),
-        json!(req.temperature),
-    );
+    body.insert("temperature".into(), json!(req.temperature));
     if let Some(effort) = req.reasoning.effort.as_ref() {
         body.insert("reasoning_effort".into(), json!(effort));
     }
@@ -52,7 +49,8 @@ pub async fn chat_completion(
         }
     }
 
-    let client = reqwest::Client::builder()
+    let url = reqwest::Url::parse(endpoint).map_err(|e| anyhow!("endpoint: {e}"))?;
+    let client = crate::services::proxy::apply_for_url(reqwest::Client::builder(), &url)?
         .timeout(req.timeout)
         .build()
         .map_err(|e| anyhow!("http client: {e}"))?;
@@ -77,10 +75,7 @@ pub async fn chat_completion(
         return Err(anyhow!("http {status}: {truncated}"));
     }
 
-    let json: Value = resp
-        .json()
-        .await
-        .map_err(|e| anyhow!("json parse: {e}"))?;
+    let json: Value = resp.json().await.map_err(|e| anyhow!("json parse: {e}"))?;
     let content = json
         .pointer("/choices/0/message/content")
         .and_then(|v| v.as_str())

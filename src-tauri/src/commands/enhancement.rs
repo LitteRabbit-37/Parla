@@ -115,8 +115,7 @@ pub fn list_llm_providers(app: AppHandle) -> Result<Vec<LLMProviderInfo>, String
             default_model: p.default_model().into(),
             models: p.default_models().iter().map(|m| (*m).into()).collect(),
             requires_api_key: p.requires_api_key(),
-            has_api_key: p.requires_api_key()
-                && crate::services::api_keys::has_api_key(p.id()),
+            has_api_key: p.requires_api_key() && crate::services::api_keys::has_api_key(p.id()),
         })
         .collect())
 }
@@ -136,11 +135,7 @@ pub fn get_llm_selection(app: AppHandle) -> Option<LLMSelection> {
 }
 
 #[command]
-pub fn set_llm_selection(
-    app: AppHandle,
-    provider_id: String,
-    model: String,
-) -> Result<(), String> {
+pub fn set_llm_selection(app: AppHandle, provider_id: String, model: String) -> Result<(), String> {
     service::set_selection(&app, &provider_id, &model).map_err(|e| e.to_string())
 }
 
@@ -185,8 +180,7 @@ pub fn get_localcli_custom_cmd(app: AppHandle) -> Option<String> {
 
 #[command]
 pub fn set_localcli_custom_cmd(app: AppHandle, cmd: String) -> Result<(), String> {
-    crate::enhancement::providers::local_cli::set_custom_cmd(&app, &cmd)
-        .map_err(|e| e.to_string())
+    crate::enhancement::providers::local_cli::set_custom_cmd(&app, &cmd).map_err(|e| e.to_string())
 }
 
 #[command]

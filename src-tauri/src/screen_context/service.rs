@@ -45,9 +45,7 @@ pub fn is_enabled(app: &AppHandle) -> bool {
 }
 
 pub fn set_enabled(app: &AppHandle, enabled: bool) -> Result<()> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| anyhow!("store: {e}"))?;
+    let store = app.store(STORE_FILE).map_err(|e| anyhow!("store: {e}"))?;
     store.set(KEY_ENABLED, serde_json::Value::Bool(enabled));
     store.save().map_err(|e| anyhow!("store save: {e}"))
 }
@@ -148,4 +146,3 @@ pub fn trigger_capture(app: &AppHandle) {
         .await;
     });
 }
-

@@ -90,7 +90,10 @@ pub struct AudioRecorder;
 impl AudioRecorder {
     /// Demarre une capture audio. Retourne apres que le thread worker a initialise
     /// le stream, pour pouvoir remonter les erreurs de setup au caller.
-    pub fn start(config: RecorderConfig, on_chunk: Option<ChunkCallback>) -> Result<RecorderHandle> {
+    pub fn start(
+        config: RecorderConfig,
+        on_chunk: Option<ChunkCallback>,
+    ) -> Result<RecorderHandle> {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let meter = Arc::new(Mutex::new(AudioMeter::default()));
 
@@ -140,7 +143,9 @@ fn run_worker(
     let device = match &config.device_name {
         Some(name) => find_input_device_by_name(name)
             .ok_or_else(|| anyhow!("peripherique audio introuvable: {name}")),
-        None => default_input_device().ok_or_else(|| anyhow!("aucun peripherique audio par defaut")),
+        None => {
+            default_input_device().ok_or_else(|| anyhow!("aucun peripherique audio par defaut"))
+        }
     };
     let device = match device {
         Ok(d) => d,

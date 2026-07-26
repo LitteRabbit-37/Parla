@@ -30,7 +30,7 @@ impl CloudTranscriptionProvider for MistralProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client()?;
+        let client = batch_client("https://api.mistral.ai/v1/models")?;
         let resp = client
             .get("https://api.mistral.ai/v1/models")
             .bearer_auth(api_key)
@@ -53,7 +53,7 @@ impl CloudTranscriptionProvider for MistralProvider {
             .text("model", request.model.clone())
             .part("file", wav_part_from_path(wav_path).await?);
 
-        let client = batch_client()?;
+        let client = batch_client("https://api.mistral.ai/v1/audio/transcriptions")?;
         let resp = client
             .post("https://api.mistral.ai/v1/audio/transcriptions")
             .header("x-api-key", api_key)
@@ -67,8 +67,8 @@ impl CloudTranscriptionProvider for MistralProvider {
         if !status.is_success() {
             anyhow::bail!("HTTP {status}: {}", String::from_utf8_lossy(&body));
         }
-        let parsed: MistralResponse = serde_json::from_slice(&body)
-            .map_err(|e| anyhow!("parse JSON Mistral: {e}"))?;
+        let parsed: MistralResponse =
+            serde_json::from_slice(&body).map_err(|e| anyhow!("parse JSON Mistral: {e}"))?;
         Ok(parsed.text)
     }
 }

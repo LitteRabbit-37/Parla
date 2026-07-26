@@ -24,13 +24,8 @@ use crate::db::{transcription as history_repo, Database};
 
 pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open Parla", true, None::<&str>)?;
-    let toggle_record = MenuItem::with_id(
-        app,
-        "toggle_record",
-        "Toggle recording",
-        true,
-        None::<&str>,
-    )?;
+    let toggle_record =
+        MenuItem::with_id(app, "toggle_record", "Toggle recording", true, None::<&str>)?;
     let copy_last = MenuItem::with_id(
         app,
         "copy_last",
@@ -40,13 +35,8 @@ pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     )?;
     let sep1 = PredefinedMenuItem::separator(app)?;
     let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
-    let check_update = MenuItem::with_id(
-        app,
-        "check_update",
-        "Check for updates",
-        true,
-        None::<&str>,
-    )?;
+    let check_update =
+        MenuItem::with_id(app, "check_update", "Check for updates", true, None::<&str>)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Parla", true, None::<&str>)?;
 

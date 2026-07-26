@@ -34,7 +34,7 @@ impl CloudTranscriptionProvider for XaiProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client()?;
+        let client = batch_client("https://api.x.ai/v1/api-key")?;
         let resp = client
             .get("https://api.x.ai/v1/api-key")
             .bearer_auth(api_key)
@@ -71,7 +71,7 @@ impl CloudTranscriptionProvider for XaiProvider {
 
         form = form.part("file", wav_part_from_path(wav_path).await?);
 
-        let client = batch_client()?;
+        let client = batch_client("https://api.x.ai/v1/stt")?;
         let resp = client
             .post("https://api.x.ai/v1/stt")
             .bearer_auth(api_key)

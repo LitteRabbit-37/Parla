@@ -15,8 +15,7 @@ use regex::Regex;
 
 static RE_THINKING: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)<thinking>.*?</thinking>").unwrap());
-static RE_THINK: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?s)<think>.*?</think>").unwrap());
+static RE_THINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<think>.*?</think>").unwrap());
 static RE_REASONING: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)<reasoning>.*?</reasoning>").unwrap());
 

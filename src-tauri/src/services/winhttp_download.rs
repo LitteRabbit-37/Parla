@@ -16,19 +16,28 @@ pub fn download<F>(url: &Url, expected_size: u64, mut on_chunk: F) -> Result<u64
 where
     F: FnMut(&[u8], u64, u64) -> bool,
 {
-    let host = url.host_str().ok_or_else(|| anyhow!("WinHTTP target has no host"))?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| anyhow!("WinHTTP target has no host"))?;
     let port = url.port_or_known_default().unwrap_or(443);
     let secure = url.scheme().eq_ignore_ascii_case("https");
     let target = format!(
         "{}{}",
         url.path(),
-        url.query().map(|query| format!("?{query}")).unwrap_or_default()
+        url.query()
+            .map(|query| format!("?{query}"))
+            .unwrap_or_default()
     );
     let host_wide = wide(host);
     let target_wide = wide(&target);
     let verb_wide = wide("GET");
     let started = std::time::Instant::now();
-    info!(host, port, scheme = url.scheme(), "WinHTTP system download started");
+    info!(
+        host,
+        port,
+        scheme = url.scheme(),
+        "WinHTTP system download started"
+    );
 
     let result = unsafe {
         download_inner(
@@ -42,8 +51,17 @@ where
         )
     };
     match &result {
-        Ok(bytes) => info!(host, port, bytes, elapsed_ms = started.elapsed().as_millis() as u64, "WinHTTP system download completed"),
-        Err(error) => warn!(host, port, elapsed_ms = started.elapsed().as_millis() as u64, error = %error, "WinHTTP system download failed"),
+        Ok(bytes) => info!(
+            host,
+            port,
+            bytes,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "WinHTTP system download completed"
+        ),
+        Err(error) => {
+            let diagnostic = crate::services::download::sanitize_message(&error.to_string());
+            warn!(host, port, elapsed_ms = started.elapsed().as_millis() as u64, error = %diagnostic, "WinHTTP system download failed")
+        }
     }
     result
 }
@@ -71,7 +89,13 @@ where
         return Err(win_error("open session"));
     }
     let session = HandleGuard(session);
-    WinHttpSetTimeouts(session.0, IO_TIMEOUT_MS, IO_TIMEOUT_MS, IO_TIMEOUT_MS, IO_TIMEOUT_MS)?;
+    WinHttpSetTimeouts(
+        session.0,
+        IO_TIMEOUT_MS,
+        IO_TIMEOUT_MS,
+        IO_TIMEOUT_MS,
+        IO_TIMEOUT_MS,
+    )?;
 
     let policy = WINHTTP_AUTOLOGON_SECURITY_LEVEL_MEDIUM;
     WinHttpSetOption(
@@ -87,7 +111,11 @@ where
         return Err(win_error("connect"));
     }
     let connection = HandleGuard(connection);
-    let flags = if secure { WINHTTP_FLAG_SECURE } else { WINHTTP_OPEN_REQUEST_FLAGS(0) };
+    let flags = if secure {
+        WINHTTP_FLAG_SECURE
+    } else {
+        WINHTTP_OPEN_REQUEST_FLAGS(0)
+    };
     let request = WinHttpOpenRequest(
         connection.0,
         PCWSTR(verb.as_ptr()),
@@ -126,7 +154,10 @@ where
         }
         let chunk = &buffer[..read as usize];
         bytes_read_total += chunk.len() as u64;
-        debug!(bytes = bytes_read_total, "WinHTTP system download body activity");
+        debug!(
+            bytes = bytes_read_total,
+            "WinHTTP system download body activity"
+        );
         if !on_chunk(chunk, bytes_read_total, total) {
             return Err(anyhow!("telechargement annule"));
         }

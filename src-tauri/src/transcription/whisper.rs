@@ -137,8 +137,7 @@ impl WhisperEngine {
         // Ici on passe les samples bruts ou deja filtres par la VAD externe.
         debug!(
             n_samples = samples.len(),
-            n_threads,
-            "Lancement whisper_full"
+            n_threads, "Lancement whisper_full"
         );
 
         state

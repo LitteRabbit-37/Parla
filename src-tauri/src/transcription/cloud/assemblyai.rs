@@ -54,7 +54,7 @@ impl CloudTranscriptionProvider for AssemblyAiProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client()?;
+        let client = batch_client("https://api.assemblyai.com/v2/transcript")?;
         let resp = client
             .get(format!("{API_BASE}/v2/transcript"))
             .header("Authorization", api_key)
@@ -73,7 +73,7 @@ impl CloudTranscriptionProvider for AssemblyAiProvider {
         api_key: &str,
         request: &TranscribeRequest,
     ) -> Result<String> {
-        let client = batch_client()?;
+        let client = batch_client("https://api.assemblyai.com/v2/upload")?;
         let bytes = tokio::fs::read(wav_path)
             .await
             .with_context(|| format!("lecture {}", wav_path.display()))?;
@@ -88,10 +88,7 @@ impl CloudTranscriptionProvider for AssemblyAiProvider {
 
         let mut payload = serde_json::Map::new();
         payload.insert("audio_url".into(), json!(upload_url));
-        payload.insert(
-            "speech_models".into(),
-            json!(speech_models),
-        );
+        payload.insert("speech_models".into(), json!(speech_models));
         payload.insert("punctuate".into(), json!(true));
         payload.insert("format_text".into(), json!(true));
 
@@ -104,15 +101,13 @@ impl CloudTranscriptionProvider for AssemblyAiProvider {
             }
         }
 
-        let trimmed_prompt = request
-            .prompt
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .to_string();
+        let trimmed_prompt = request.prompt.as_deref().unwrap_or("").trim().to_string();
         let supports_prompt = supports_prompt(&speech_models);
         if supports_prompt && !trimmed_prompt.is_empty() {
-            payload.insert("prompt".into(), json!(append_keyterms(&keyterms, &trimmed_prompt)));
+            payload.insert(
+                "prompt".into(),
+                json!(append_keyterms(&keyterms, &trimmed_prompt)),
+            );
         } else if !keyterms.is_empty() && supports_keyterms(primary) {
             payload.insert("keyterms_prompt".into(), json!(keyterms));
         }
@@ -158,11 +153,7 @@ async fn upload(client: &reqwest::Client, api_key: &str, bytes: Vec<u8>) -> Resu
     Ok(parsed.upload_url)
 }
 
-async fn poll_transcript(
-    client: &reqwest::Client,
-    api_key: &str,
-    id: &str,
-) -> Result<String> {
+async fn poll_transcript(client: &reqwest::Client, api_key: &str, id: &str) -> Result<String> {
     let url = format!("{API_BASE}/v2/transcript/{id}");
     let start = std::time::Instant::now();
     loop {
@@ -190,7 +181,9 @@ async fn poll_transcript(
             "error" => {
                 anyhow::bail!(
                     "AssemblyAI: {}",
-                    parsed.error.unwrap_or_else(|| "transcription failed".into())
+                    parsed
+                        .error
+                        .unwrap_or_else(|| "transcription failed".into())
                 );
             }
             _ => {}

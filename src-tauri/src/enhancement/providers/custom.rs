@@ -21,14 +21,15 @@ const KEY_BASE_URL: &str = "llm_custom_base_url";
 pub fn get_base_url(app: &tauri::AppHandle) -> Option<String> {
     app.store(STORE_FILE)
         .ok()
-        .and_then(|s| s.get(KEY_BASE_URL).and_then(|v| v.as_str().map(String::from)))
+        .and_then(|s| {
+            s.get(KEY_BASE_URL)
+                .and_then(|v| v.as_str().map(String::from))
+        })
         .filter(|s| !s.is_empty())
 }
 
 pub fn set_base_url(app: &tauri::AppHandle, url: &str) -> Result<()> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| anyhow!("store: {e}"))?;
+    let store = app.store(STORE_FILE).map_err(|e| anyhow!("store: {e}"))?;
     let trimmed = url.trim();
     if trimmed.is_empty() {
         store.delete(KEY_BASE_URL);

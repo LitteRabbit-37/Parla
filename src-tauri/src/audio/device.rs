@@ -26,9 +26,7 @@ pub struct AudioDeviceInfo {
 
 pub fn list_input_devices() -> Vec<AudioDeviceInfo> {
     let host = cpal::default_host();
-    let default_name = host
-        .default_input_device()
-        .and_then(|d| d.name().ok());
+    let default_name = host.default_input_device().and_then(|d| d.name().ok());
 
     let mut out = Vec::new();
     match host.input_devices() {

@@ -25,7 +25,7 @@ impl CloudTranscriptionProvider for CartesiaProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client()?;
+        let client = batch_client("https://api.cartesia.ai/voices?limit=1")?;
         let resp = client
             .get("https://api.cartesia.ai/voices?limit=1")
             .header("X-API-Key", api_key)

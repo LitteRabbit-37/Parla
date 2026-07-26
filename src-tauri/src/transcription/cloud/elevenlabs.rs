@@ -30,7 +30,7 @@ impl CloudTranscriptionProvider for ElevenLabsProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client()?;
+        let client = batch_client("https://api.elevenlabs.io/v1/user")?;
         let resp = client
             .get("https://api.elevenlabs.io/v1/user")
             .header("xi-api-key", api_key)
@@ -61,7 +61,7 @@ impl CloudTranscriptionProvider for ElevenLabsProvider {
             }
         }
 
-        let client = batch_client()?;
+        let client = batch_client("https://api.elevenlabs.io/v1/speech-to-text")?;
         let resp = client
             .post("https://api.elevenlabs.io/v1/speech-to-text")
             .header("xi-api-key", api_key)
@@ -77,8 +77,8 @@ impl CloudTranscriptionProvider for ElevenLabsProvider {
             anyhow::bail!("HTTP {status}: {}", String::from_utf8_lossy(&body));
         }
 
-        let parsed: ElevenLabsResponse = serde_json::from_slice(&body)
-            .map_err(|e| anyhow!("parse JSON: {e}"))?;
+        let parsed: ElevenLabsResponse =
+            serde_json::from_slice(&body).map_err(|e| anyhow!("parse JSON: {e}"))?;
         Ok(parsed.text)
     }
 }

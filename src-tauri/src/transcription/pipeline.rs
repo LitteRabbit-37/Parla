@@ -14,12 +14,12 @@ use tauri_plugin_store::StoreExt;
 use tokio::task;
 use tracing::{info, warn};
 
+use crate::audio::feedback::{self, Cue};
 use crate::db::{transcription as history_repo, word_replacement as word_repo, Database};
 use crate::enhancement::prompt_detection;
 use crate::enhancement::prompts as prompt_store;
 use crate::enhancement::service as llm_service;
 use crate::mini_recorder;
-use crate::audio::feedback::{self, Cue};
 use crate::paste::paste_at_cursor;
 use crate::services::api_keys;
 use crate::text_processing::{
@@ -162,7 +162,10 @@ pub fn set_selected_model(app: &AppHandle, id: Option<&str>) -> Result<()> {
         .store(STORE_FILE)
         .map_err(|e| anyhow!("store open: {e}"))?;
     match id {
-        Some(id) => store.set(SELECTED_MODEL_KEY, serde_json::Value::String(id.to_string())),
+        Some(id) => store.set(
+            SELECTED_MODEL_KEY,
+            serde_json::Value::String(id.to_string()),
+        ),
         None => {
             store.delete(SELECTED_MODEL_KEY);
         }
@@ -235,14 +238,14 @@ pub fn supports_streaming(provider_id: &str, model_id: &str) -> bool {
 /// Renvoie Some((provider, model)) si oui, None sinon.
 pub fn active_streaming_target(app: &AppHandle) -> Option<(String, String)> {
     let store = app.store(STORE_FILE).ok()?;
-    let kind = store.get("transcription_source_kind")?.as_str()?.to_string();
+    let kind = store
+        .get("transcription_source_kind")?
+        .as_str()?
+        .to_string();
     if kind != "cloud" {
         return None;
     }
-    let provider = store
-        .get("selected_cloud_provider")?
-        .as_str()?
-        .to_string();
+    let provider = store.get("selected_cloud_provider")?.as_str()?.to_string();
     let model = store.get("selected_cloud_model")?.as_str()?.to_string();
     if supports_streaming(&provider, &model) {
         Some((provider, model))
@@ -263,8 +266,8 @@ pub async fn start_streaming_session(
         .0
         .clone();
 
-    let key = api_keys::get_api_key(&provider)?
-        .ok_or_else(|| anyhow!("PARLA_ERR:apiKey:{provider}"))?;
+    let key =
+        api_keys::get_api_key(&provider)?.ok_or_else(|| anyhow!("PARLA_ERR:apiKey:{provider}"))?;
 
     // Injection du dictionnaire enabled comme en batch.
     let mut custom_vocab = Vec::new();
@@ -292,10 +295,7 @@ pub async fn start_streaming_session(
 }
 
 /// Finalise une session streaming et applique le post-traitement + paste.
-pub async fn finalize_streaming_session(
-    app: AppHandle,
-    handle: StreamingHandle,
-) -> Result<()> {
+pub async fn finalize_streaming_session(app: AppHandle, handle: StreamingHandle) -> Result<()> {
     let start = std::time::Instant::now();
     let text = handle.finalize().await?;
     let duration_ms = start.elapsed().as_millis() as u64;
@@ -492,15 +492,12 @@ async fn run_pipeline(app: AppHandle, wav_path: PathBuf) -> Result<()> {
         if provider.is_empty() || model.is_empty() {
             anyhow::bail!("PARLA_ERR:cloudUnconfigured");
         }
-        let (text, duration_ms) = transcribe_cloud(
-            &app,
-            &wav_path,
-            provider,
-            model,
-            language.clone(),
-        )
-        .await?;
-        info!(chars = text.len(), duration_ms, provider, model, "Transcription cloud terminee");
+        let (text, duration_ms) =
+            transcribe_cloud(&app, &wav_path, provider, model, language.clone()).await?;
+        info!(
+            chars = text.len(),
+            duration_ms, provider, model, "Transcription cloud terminee"
+        );
         mark_transcribed_in_history(
             &app,
             &text,
@@ -619,7 +616,10 @@ async fn run_pipeline(app: AppHandle, wav_path: PathBuf) -> Result<()> {
     .map_err(|e| anyhow!("task join: {e}"))??;
 
     let duration_ms = start.elapsed().as_millis() as u64;
-    info!(chars = text.len(), duration_ms, "Transcription locale terminee");
+    info!(
+        chars = text.len(),
+        duration_ms, "Transcription locale terminee"
+    );
     mark_transcribed_in_history(
         &app,
         &text,
@@ -658,11 +658,7 @@ fn mark_transcribed_in_history(
     let _ = app.emit("history:updated", &id);
 }
 
-fn mark_enhanced_in_history(
-    app: &AppHandle,
-    enhanced: &str,
-    enhance_ms: u64,
-) {
+fn mark_enhanced_in_history(app: &AppHandle, enhanced: &str, enhance_ms: u64) {
     let Some(id) = current_history_id(app) else {
         return;
     };

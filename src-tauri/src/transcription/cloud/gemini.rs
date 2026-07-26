@@ -51,7 +51,7 @@ impl CloudTranscriptionProvider for GeminiProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client()?;
+        let client = batch_client("https://generativelanguage.googleapis.com/v1beta/models")?;
         let resp = client
             .get("https://generativelanguage.googleapis.com/v1beta/models")
             .header("x-goog-api-key", api_key)
@@ -92,7 +92,7 @@ impl CloudTranscriptionProvider for GeminiProvider {
             request.model
         );
 
-        let client = batch_client()?;
+        let client = batch_client(&url)?;
         let resp = client
             .post(&url)
             .header("x-goog-api-key", api_key)
@@ -108,8 +108,8 @@ impl CloudTranscriptionProvider for GeminiProvider {
             anyhow::bail!("HTTP {status}: {}", String::from_utf8_lossy(&body));
         }
 
-        let parsed: GeminiResponse = serde_json::from_slice(&body)
-            .map_err(|e| anyhow!("parse JSON Gemini: {e}"))?;
+        let parsed: GeminiResponse =
+            serde_json::from_slice(&body).map_err(|e| anyhow!("parse JSON Gemini: {e}"))?;
         let text = parsed
             .candidates
             .first()

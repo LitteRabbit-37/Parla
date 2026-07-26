@@ -14,8 +14,7 @@ const WORDS_KEY: &str = "filler_words";
 
 /// Liste par defaut alignee sur FillerWordManager.swift L6-9.
 pub const DEFAULT_FILLER_WORDS: &[&str] = &[
-    "uh", "um", "uhm", "umm", "uhh", "uhhh",
-    "hmm", "hm", "mmm", "mm", "mh", "ehh",
+    "uh", "um", "uhm", "umm", "uhh", "uhhh", "hmm", "hm", "mmm", "mm", "mh", "ehh",
 ];
 
 pub fn is_enabled(app: &AppHandle) -> bool {

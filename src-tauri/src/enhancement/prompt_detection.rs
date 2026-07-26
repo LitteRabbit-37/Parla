@@ -33,8 +33,7 @@ pub fn detect_and_strip(prompts: &[CustomPrompt], text: &str) -> Option<PromptDe
         if prompt.trigger_words.is_empty() {
             continue;
         }
-        if let Some((word, processed)) =
-            detect_and_strip_trigger_word(text, &prompt.trigger_words)
+        if let Some((word, processed)) = detect_and_strip_trigger_word(text, &prompt.trigger_words)
         {
             return Some(PromptDetectionResult {
                 prompt_id: prompt.id.clone(),
@@ -46,10 +45,7 @@ pub fn detect_and_strip(prompts: &[CustomPrompt], text: &str) -> Option<PromptDe
     None
 }
 
-fn detect_and_strip_trigger_word(
-    text: &str,
-    trigger_words: &[String],
-) -> Option<(String, String)> {
+fn detect_and_strip_trigger_word(text: &str, trigger_words: &[String]) -> Option<(String, String)> {
     let mut trimmed: Vec<String> = trigger_words
         .iter()
         .map(|w| w.trim().to_string())
@@ -160,13 +156,17 @@ fn strip_trailing_trigger_word(text: &str, trigger: &str) -> Option<String> {
 }
 
 fn strip_leading_punct_ws(s: &str) -> String {
-    s.trim_start_matches(|c: char| matches!(c, ',' | '.' | '!' | '?' | ';' | ':') || c.is_whitespace())
-        .to_string()
+    s.trim_start_matches(|c: char| {
+        matches!(c, ',' | '.' | '!' | '?' | ';' | ':') || c.is_whitespace()
+    })
+    .to_string()
 }
 
 fn strip_trailing_punct_ws(s: &str) -> String {
-    s.trim_end_matches(|c: char| matches!(c, ',' | '.' | '!' | '?' | ';' | ':') || c.is_whitespace())
-        .to_string()
+    s.trim_end_matches(|c: char| {
+        matches!(c, ',' | '.' | '!' | '?' | ';' | ':') || c.is_whitespace()
+    })
+    .to_string()
 }
 
 fn capitalize_first(s: &str) -> String {
@@ -254,10 +254,7 @@ mod tests {
 
     #[test]
     fn empty_triggers_skipped() {
-        let prompts = vec![
-            prompt("email", &[""]),
-            prompt("chat", &["hey"]),
-        ];
+        let prompts = vec![prompt("email", &[""]), prompt("chat", &["hey"])];
         let r = detect_and_strip(&prompts, "hey bonjour").unwrap();
         assert_eq!(r.prompt_id, "chat");
     }

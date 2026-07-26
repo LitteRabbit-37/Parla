@@ -20,7 +20,8 @@ pub struct Database(pub Arc<Mutex<Connection>>);
 impl Database {
     pub fn open(app: &AppHandle) -> Result<Self> {
         let path = db_path(app)?;
-        let conn = Connection::open(&path).with_context(|| format!("ouverture DB {}", path.display()))?;
+        let conn =
+            Connection::open(&path).with_context(|| format!("ouverture DB {}", path.display()))?;
         schema::init(&conn)?;
         Ok(Self(Arc::new(Mutex::new(conn))))
     }

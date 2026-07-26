@@ -66,9 +66,7 @@ pub fn set_style(app: &AppHandle, style: RecorderStyle) -> anyhow::Result<()> {
         .store(STORE_FILE)
         .map_err(|e| anyhow::anyhow!("store: {e}"))?;
     store.set(KEY_STYLE, serde_json::Value::String(style.as_str().into()));
-    store
-        .save()
-        .map_err(|e| anyhow::anyhow!("store save: {e}"))
+    store.save().map_err(|e| anyhow::anyhow!("store save: {e}"))
 }
 
 /// Cree la fenetre recorder si elle n'existe pas, sinon la ramene au premier plan.
@@ -120,8 +118,7 @@ fn apply_no_activate_style(window: &tauri::WebviewWindow) {
     {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::UI::WindowsAndMessaging::{
-            GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE,
-            WS_EX_TOOLWINDOW,
+            GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
         };
         let Ok(raw_hwnd) = window.hwnd() else {
             warn!("hwnd() recorder: indisponible");

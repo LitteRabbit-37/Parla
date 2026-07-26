@@ -331,11 +331,23 @@ impl ParakeetModelManager {
             }
             missing.push(f);
             #[cfg(windows)]
-            if crate::services::proxy::uses_system_proxy() {
+            #[cfg(windows)]
+            if matches!(
+                crate::services::proxy::route_for_url(&url::Url::parse(&file_url(v.repo, f))?)?,
+                crate::services::proxy::ProxyRoute::System
+            ) {
                 continue;
             }
             let url = file_url(v.repo, f);
-            let client = crate::transcription::cloud::http::batch_client(&url)?;
+            let url_parsed = url::Url::parse(&url)?;
+            let client = crate::services::proxy::apply_for_url(
+                reqwest::Client::builder()
+                    .timeout(crate::transcription::cloud::http::BATCH_TIMEOUT)
+                    .connect_timeout(crate::transcription::cloud::http::CONNECT_TIMEOUT),
+                &url_parsed,
+            )?
+            .build()
+            .map_err(|e| anyhow!("http client: {e}"))?;
             if let Ok(resp) = client.head(&url).send().await {
                 if let Some(len) = resp.content_length() {
                     total_global += len;
@@ -354,13 +366,15 @@ impl ParakeetModelManager {
                 return Err(anyhow!("telechargement annule"));
             }
             let url = file_url(v.repo, f);
-            let client = crate::transcription::cloud::http::batch_client(&url)?;
             let target = dir.join(f);
             let tmp = target.with_extension("part");
             let _ = fs::remove_file(&tmp);
 
             #[cfg(windows)]
-            if crate::services::proxy::uses_system_proxy() {
+            if matches!(
+                crate::services::proxy::route_for_url(&url::Url::parse(&url)?)?,
+                crate::services::proxy::ProxyRoute::System
+            ) {
                 let app = self.app.clone();
                 let id_owned = id.to_owned();
                 let file_name = f.to_owned();
@@ -370,20 +384,47 @@ impl ParakeetModelManager {
                 let total = total_global;
                 tokio::task::spawn_blocking(move || {
                     let mut file = fs::File::create(&tmp_for_worker)?;
-                    crate::services::winhttp_download::download(&url_parsed, 0, |chunk, downloaded, _| {
-                        use std::io::Write;
-                        if cancel_for_worker.load(std::sync::atomic::Ordering::SeqCst) { return false; }
-                        if file.write_all(chunk).is_err() { return false; }
-                        let _ = app.emit("parakeet_model:download:progress", DownloadProgress { id: id_owned.clone(), downloaded: downloaded, total, current_file: file_name.clone() });
-                        true
-                    })?;
+                    crate::services::winhttp_download::download(
+                        &url_parsed,
+                        0,
+                        |chunk, downloaded, _| {
+                            use std::io::Write;
+                            if cancel_for_worker.load(std::sync::atomic::Ordering::SeqCst) {
+                                return false;
+                            }
+                            if file.write_all(chunk).is_err() {
+                                return false;
+                            }
+                            let _ = app.emit(
+                                "parakeet_model:download:progress",
+                                DownloadProgress {
+                                    id: id_owned.clone(),
+                                    downloaded: downloaded,
+                                    total,
+                                    current_file: file_name.clone(),
+                                },
+                            );
+                            true
+                        },
+                    )?;
                     file.sync_all()?;
                     Ok::<_, anyhow::Error>(())
-                }).await.map_err(|error| anyhow!("Parakeet system download worker failed: {error}"))??;
+                })
+                .await
+                .map_err(|error| anyhow!("Parakeet system download worker failed: {error}"))??;
                 fs::rename(&tmp, &target)?;
                 continue;
             }
 
+            let url_parsed = url::Url::parse(&url)?;
+            let client = crate::services::proxy::apply_for_url(
+                reqwest::Client::builder()
+                    .timeout(crate::transcription::cloud::http::BATCH_TIMEOUT)
+                    .connect_timeout(crate::transcription::cloud::http::CONNECT_TIMEOUT),
+                &url_parsed,
+            )?
+            .build()
+            .map_err(|e| anyhow!("http client: {e}"))?;
             let resp = client
                 .get(&url)
                 .send()

@@ -125,9 +125,7 @@ fn stop(app: &AppHandle, manager: &Arc<HotkeyManager>, state: &tauri::State<Reco
             if let Some(handle) = streaming_handle {
                 let app_bg = app.clone();
                 tauri::async_runtime::spawn(async move {
-                    if let Err(e) =
-                        pipeline::finalize_streaming_session(app_bg, handle).await
-                    {
+                    if let Err(e) = pipeline::finalize_streaming_session(app_bg, handle).await {
                         warn!("finalize streaming: {e}");
                     }
                 });
@@ -171,13 +169,9 @@ async fn start_with_streaming(
     model: String,
 ) -> anyhow::Result<()> {
     let language = pipeline::get_language(&app);
-    let handle = pipeline::start_streaming_session(
-        app.clone(),
-        provider.clone(),
-        model.clone(),
-        language,
-    )
-    .await?;
+    let handle =
+        pipeline::start_streaming_session(app.clone(), provider.clone(), model.clone(), language)
+            .await?;
 
     // Ligne history pending (avant le start recording pour que l'UI puisse
     // deja la voir).

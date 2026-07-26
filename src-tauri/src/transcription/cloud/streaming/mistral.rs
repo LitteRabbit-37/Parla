@@ -66,10 +66,7 @@ impl StreamingProvider for MistralStreaming {
                     match json.get("type").and_then(|v| v.as_str()) {
                         Some("session.created") => break,
                         Some("error") => {
-                            return Err(anyhow!(
-                                "Mistral handshake: {}",
-                                extract_error(&json)
-                            ));
+                            return Err(anyhow!("Mistral handshake: {}", extract_error(&json)));
                         }
                         _ => continue,
                     }
@@ -87,9 +84,7 @@ impl StreamingProvider for MistralStreaming {
                 "audio_format": { "encoding": "pcm_s16le", "sample_rate": 16000 }
             }
         });
-        write
-            .send(Message::Text(update.to_string().into()))
-            .await?;
+        write.send(Message::Text(update.to_string().into())).await?;
 
         on_event(StreamingEvent::SessionStarted);
 

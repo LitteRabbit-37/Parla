@@ -5,9 +5,7 @@ use std::sync::Arc;
 use tauri::{command, AppHandle, Manager};
 
 pub use crate::transcription::parakeet_model_manager::ParakeetModelManagerState;
-use crate::transcription::parakeet_model_manager::{
-    ParakeetModelManager, ParakeetModelState,
-};
+use crate::transcription::parakeet_model_manager::{ParakeetModelManager, ParakeetModelState};
 
 pub fn ensure_state(app: &AppHandle) -> Arc<ParakeetModelManager> {
     if let Some(s) = app.try_state::<ParakeetModelManagerState>() {
@@ -31,7 +29,7 @@ pub async fn download_parakeet_model(app: AppHandle, id: String) -> Result<Strin
     mgr.download(&id)
         .await
         .map(|p| p.to_string_lossy().into_owned())
-        .map_err(|e| e.to_string())
+        .map_err(|e| crate::services::download::diagnostic(&e))
 }
 
 #[command]

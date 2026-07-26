@@ -17,9 +17,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use tauri_plugin_store::StoreExt;
 
-use crate::enhancement::provider::{
-    EnhancementRequest, EnhancementResponse, LLMProvider,
-};
+use crate::enhancement::provider::{EnhancementRequest, EnhancementResponse, LLMProvider};
 
 use super::url_validator;
 
@@ -32,15 +30,16 @@ const KEY_BASE_URL: &str = "ollama_base_url";
 pub fn get_base_url(app: &tauri::AppHandle) -> String {
     app.store(STORE_FILE)
         .ok()
-        .and_then(|s| s.get(KEY_BASE_URL).and_then(|v| v.as_str().map(String::from)))
+        .and_then(|s| {
+            s.get(KEY_BASE_URL)
+                .and_then(|v| v.as_str().map(String::from))
+        })
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| DEFAULT_BASE_URL.to_string())
 }
 
 pub fn set_base_url(app: &tauri::AppHandle, url: &str) -> Result<()> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| anyhow!("store: {e}"))?;
+    let store = app.store(STORE_FILE).map_err(|e| anyhow!("store: {e}"))?;
     let trimmed = url.trim();
     if trimmed.is_empty() {
         store.delete(KEY_BASE_URL);
@@ -57,7 +56,9 @@ pub fn set_base_url(app: &tauri::AppHandle, url: &str) -> Result<()> {
 /// Liste les modeles Ollama installes sur la machine.
 pub async fn list_models(base_url: &str) -> Result<Vec<String>> {
     let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
-    let resp = reqwest::Client::new()
+    let parsed_url = reqwest::Url::parse(&url)?;
+    let resp = crate::services::proxy::apply_for_url(reqwest::Client::builder(), &parsed_url)?
+        .build()?
         .get(&url)
         .send()
         .await
@@ -118,10 +119,12 @@ impl LLMProvider for OllamaProvider {
             "options": { "temperature": req.temperature },
             "stream": false,
         });
-        let client = reqwest::Client::builder()
-            .timeout(req.timeout)
-            .build()
-            .map_err(|e| anyhow!("http client: {e}"))?;
+        let parsed_url = reqwest::Url::parse(&url)?;
+        let client =
+            crate::services::proxy::apply_for_url(reqwest::Client::builder(), &parsed_url)?
+                .timeout(req.timeout)
+                .build()
+                .map_err(|e| anyhow!("http client: {e}"))?;
         let resp = client.post(&url).json(&body).send().await.map_err(|e| {
             if e.is_timeout() {
                 anyhow!("timeout: {e}")

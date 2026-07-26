@@ -61,7 +61,7 @@ impl CloudTranscriptionProvider for SpeechmaticsProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client()?;
+        let client = batch_client("https://asr.api.speechmatics.com/v2/jobs")?;
         let resp = client
             .get("https://asr.api.speechmatics.com/v2/jobs")
             .bearer_auth(api_key)
@@ -80,7 +80,7 @@ impl CloudTranscriptionProvider for SpeechmaticsProvider {
         api_key: &str,
         request: &TranscribeRequest,
     ) -> Result<String> {
-        let client = batch_client()?;
+        let client = batch_client("https://asr.api.speechmatics.com/v2/jobs")?;
 
         let lang = map_language_owned(request.language.as_deref());
         let mut transcription_config = serde_json::Map::new();
@@ -127,9 +127,7 @@ impl CloudTranscriptionProvider for SpeechmaticsProvider {
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
             let st: JobStatus = client
-                .get(format!(
-                    "https://asr.api.speechmatics.com/v2/jobs/{job_id}"
-                ))
+                .get(format!("https://asr.api.speechmatics.com/v2/jobs/{job_id}"))
                 .bearer_auth(api_key)
                 .send()
                 .await?
