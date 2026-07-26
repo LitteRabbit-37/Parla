@@ -169,12 +169,36 @@ pub async fn download_vad(app: &AppHandle) -> Result<PathBuf> {
     let tmp = target.with_extension("bin.part");
     let _ = fs::remove_file(&tmp);
 
-    let client = reqwest::Client::new();
-    let resp = client
+    let url = url::Url::parse(VAD_MODEL_URL)?;
+    #[cfg(windows)]
+    if crate::services::proxy::uses_system_proxy() {
+        let tmp_for_worker = tmp.clone();
+        let app_for_worker = app.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut file = fs::File::create(&tmp_for_worker)?;
+            crate::services::winhttp_download::download(&url, VAD_MODEL_SIZE_BYTES, |chunk, downloaded, total| {
+                use std::io::Write;
+                file.write_all(chunk).is_ok() && {
+                    let _ = app_for_worker.emit("vad:download:progress", VadDownloadProgress { downloaded, total });
+                    true
+                }
+            })?;
+            file.sync_all()?;
+            Ok::<_, anyhow::Error>(())
+        }).await.map_err(|error| anyhow!("VAD system download worker failed: {error}"))??;
+        fs::rename(&tmp, &target)?;
+        let _ = app.emit("vad:download:complete", serde_json::json!({ "path": target.to_string_lossy() }));
+        info!(path = %target.display(), "Modele VAD telecharge via WinHTTP");
+        return Ok(target);
+    }
+    let client =
+        crate::services::proxy::apply_for_url(reqwest::Client::builder(), &url)?.build()?;
+    let result = client
         .get(VAD_MODEL_URL)
         .send()
         .await
-        .with_context(|| format!("GET {VAD_MODEL_URL}"))?;
+        .with_context(|| format!("GET {VAD_MODEL_URL}"));
+    let resp = result?;
     if !resp.status().is_success() {
         anyhow::bail!("HTTP {} depuis {}", resp.status(), VAD_MODEL_URL);
     }

@@ -252,7 +252,10 @@ impl GgufModelManager {
             if flags.contains_key(id) {
                 return Err(anyhow!("telechargement deja en cours: {id}"));
             }
-            flags.insert(id.to_string(), Arc::new(std::sync::atomic::AtomicBool::new(false)));
+            flags.insert(
+                id.to_string(),
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            );
         }
         let result = self.download_impl(id).await;
         self.cancel_flags.lock().remove(id);
@@ -261,7 +264,7 @@ impl GgufModelManager {
                 "llm_model:download:error",
                 DownloadError {
                     id: id.to_string(),
-                    message: e.to_string(),
+                    message: crate::services::download::diagnostic(e),
                 },
             );
         }
@@ -284,7 +287,32 @@ impl GgufModelManager {
         let tmp = target.with_extension("gguf.part");
         let _ = fs::remove_file(&tmp);
 
-        let client = reqwest::Client::new();
+        let url = url::Url::parse(m.url)?;
+        #[cfg(windows)]
+        if crate::services::proxy::uses_system_proxy() {
+            let app = self.app.clone();
+            let id_owned = id.to_owned();
+            let tmp_for_worker = tmp.clone();
+            let cancel_for_worker = cancel.clone();
+            tokio::task::spawn_blocking(move || {
+                let mut file = fs::File::create(&tmp_for_worker)?;
+                crate::services::winhttp_download::download(&url, m.size_bytes, |chunk, downloaded, total| {
+                    use std::io::Write;
+                    if cancel_for_worker.load(std::sync::atomic::Ordering::SeqCst) { return false; }
+                    if file.write_all(chunk).is_err() { return false; }
+                    let _ = app.emit("llm_model:download:progress", DownloadProgress { id: id_owned.clone(), downloaded, total });
+                    true
+                })?;
+                file.sync_all()?;
+                Ok::<_, anyhow::Error>(())
+            }).await.map_err(|error| anyhow!("GGUF system download worker failed: {error}"))??;
+            let _ = self.app.emit("llm_model:download:progress", DownloadProgress { id: id.to_string(), downloaded: m.size_bytes, total: m.size_bytes });
+            fs::rename(&tmp, &target)?;
+            let _ = self.app.emit("llm_model:download:complete", DownloadComplete { id: id.to_string(), path: target.to_string_lossy().into_owned() });
+            return Ok(target);
+        }
+        let client =
+            crate::services::proxy::apply_for_url(reqwest::Client::builder(), &url)?.build()?;
         let resp = client
             .get(m.url)
             .send()

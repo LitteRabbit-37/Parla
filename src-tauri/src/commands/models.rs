@@ -29,11 +29,7 @@ pub async fn download_whisper_model(
     let mgr = state.0.clone();
     match mgr.download(&id).await {
         Ok(path) => Ok(path.to_string_lossy().into_owned()),
-        Err(e) => {
-            let msg = e.to_string();
-            mgr.emit_error(&id, &msg);
-            Err(msg)
-        }
+        Err(e) => Err(crate::services::download::diagnostic(&e)),
     }
 }
 

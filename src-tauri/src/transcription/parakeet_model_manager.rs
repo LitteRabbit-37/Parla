@@ -50,9 +50,8 @@ pub struct ParakeetVariant {
 /// 25 langues europeennes supportees par Parakeet TDT v3 + "auto" en tete.
 /// Reference VoiceInk LanguageDictionary.forProvider(.fluidAudio).
 pub const PARAKEET_V3_LANGS: &[&str] = &[
-    "auto", "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hr",
-    "hu", "it", "lt", "lv", "mt", "nl", "pl", "pt", "ro", "ru", "sk", "sl",
-    "sv", "uk",
+    "auto", "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hr", "hu", "it", "lt",
+    "lv", "mt", "nl", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "uk",
 ];
 
 pub const PARAKEET_VARIANTS: &[ParakeetVariant] = &[
@@ -176,7 +175,6 @@ struct DownloadError {
     id: String,
     message: String,
 }
-
 
 pub struct ParakeetModelManager {
     app: AppHandle,
@@ -303,7 +301,7 @@ impl ParakeetModelManager {
                 "parakeet_model:download:error",
                 DownloadError {
                     id: id.to_string(),
-                    message: e.to_string(),
+                    message: crate::services::download::diagnostic(e),
                 },
             );
         }
@@ -322,8 +320,6 @@ impl ParakeetModelManager {
             .cloned()
             .ok_or_else(|| anyhow!("cancel flag missing for {id}"))?;
 
-        let client = reqwest::Client::new();
-
         // Deux passes : d'abord HEAD pour additionner les total bytes (pour
         // afficher une progression globale coherente), puis GET sequentiel.
         let mut total_global: u64 = 0;
@@ -334,7 +330,12 @@ impl ParakeetModelManager {
                 continue;
             }
             missing.push(f);
+            #[cfg(windows)]
+            if crate::services::proxy::uses_system_proxy() {
+                continue;
+            }
             let url = file_url(v.repo, f);
+            let client = crate::transcription::cloud::http::batch_client(&url)?;
             if let Ok(resp) = client.head(&url).send().await {
                 if let Some(len) = resp.content_length() {
                     total_global += len;
@@ -353,9 +354,35 @@ impl ParakeetModelManager {
                 return Err(anyhow!("telechargement annule"));
             }
             let url = file_url(v.repo, f);
+            let client = crate::transcription::cloud::http::batch_client(&url)?;
             let target = dir.join(f);
             let tmp = target.with_extension("part");
             let _ = fs::remove_file(&tmp);
+
+            #[cfg(windows)]
+            if crate::services::proxy::uses_system_proxy() {
+                let app = self.app.clone();
+                let id_owned = id.to_owned();
+                let file_name = f.to_owned();
+                let cancel_for_worker = cancel.clone();
+                let url_parsed = url::Url::parse(&url)?;
+                let tmp_for_worker = tmp.clone();
+                let total = total_global;
+                tokio::task::spawn_blocking(move || {
+                    let mut file = fs::File::create(&tmp_for_worker)?;
+                    crate::services::winhttp_download::download(&url_parsed, 0, |chunk, downloaded, _| {
+                        use std::io::Write;
+                        if cancel_for_worker.load(std::sync::atomic::Ordering::SeqCst) { return false; }
+                        if file.write_all(chunk).is_err() { return false; }
+                        let _ = app.emit("parakeet_model:download:progress", DownloadProgress { id: id_owned.clone(), downloaded: downloaded, total, current_file: file_name.clone() });
+                        true
+                    })?;
+                    file.sync_all()?;
+                    Ok::<_, anyhow::Error>(())
+                }).await.map_err(|error| anyhow!("Parakeet system download worker failed: {error}"))??;
+                fs::rename(&tmp, &target)?;
+                continue;
+            }
 
             let resp = client
                 .get(&url)

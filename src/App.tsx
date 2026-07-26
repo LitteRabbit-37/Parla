@@ -30,7 +30,7 @@ import { Onboarding } from "@/components/Onboarding";
 import { PermissionsPanel } from "@/components/PermissionsPanel";
 import { PostProcessingPanel } from "@/components/PostProcessingPanel";
 import { PowerModePanel } from "@/components/PowerModePanel";
-import { SettingsPanel } from "@/components/SettingsPanel";
+import { ApplicationProxyCard, SettingsPanel } from "@/components/SettingsPanel";
 import { RecorderPanel } from "@/components/RecorderPanel";
 import { TranscribePanel } from "@/components/TranscribePanel";
 import { UpdateChecker } from "@/components/UpdateChecker";
@@ -237,6 +237,7 @@ function App() {
               />
               <SettingsPanel />
               <PostProcessingPanel />
+              <ApplicationProxyCard />
             </>
           )}
         </div>

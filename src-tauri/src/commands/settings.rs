@@ -271,3 +271,102 @@ pub fn get_sound_feedback_enabled(app: AppHandle) -> bool {
 pub fn set_sound_feedback_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
     crate::audio::feedback::set_enabled(&app, enabled).map_err(|e| e.to_string())
 }
+use crate::services::proxy;
+const PROXY_SETTINGS_KEY: &str = "proxy_settings";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProxySettings {
+    pub enabled: bool,
+    pub url: Option<String>,
+    #[serde(default)]
+    pub no_proxy_entries: Vec<String>,
+}
+impl Default for ProxySettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: None,
+            no_proxy_entries: Vec::new(),
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_proxy_settings(app: AppHandle) -> ProxySettings {
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|s| s.get(PROXY_SETTINGS_KEY))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default()
+}
+#[tauri::command]
+pub fn set_proxy_settings(app: AppHandle, settings: ProxySettings) -> Result<(), String> {
+    let mut settings = settings;
+    let embedded_credentials = settings
+        .url
+        .as_deref()
+        .filter(|u| !u.trim().is_empty())
+        .map(proxy::sanitize_proxy_url)
+        .transpose()?;
+    if let Some((url, credentials)) = embedded_credentials {
+        settings.url = Some(url);
+        if let Some((username, password)) = credentials {
+            let identity = proxy::proxy_identity(settings.url.as_deref().unwrap())
+                .map_err(|e| e.to_string())?;
+            proxy::set_credentials_for(&username, &password, &identity)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    proxy::validate_settings(
+        settings.enabled,
+        settings.url.as_deref(),
+        &settings.no_proxy_entries,
+    )?;
+    let store = app.store(STORE_FILE).map_err(|e| e.to_string())?;
+    let previous = store.get(PROXY_SETTINGS_KEY);
+    store.set(
+        PROXY_SETTINGS_KEY,
+        serde_json::to_value(settings).map_err(|e| e.to_string())?,
+    );
+    if let Err(error) = store.save() {
+        return Err(error.to_string());
+    }
+    if let Err(error) = proxy::configure(&app) {
+        match previous {
+            Some(value) => {
+                store.set(PROXY_SETTINGS_KEY, value);
+            }
+            None => {
+                store.delete(PROXY_SETTINGS_KEY);
+            }
+        }
+        let _ = store.save();
+        let _ = proxy::configure(&app);
+        return Err(error.to_string());
+    }
+    Ok(())
+}
+#[tauri::command]
+pub fn set_proxy_credentials(
+    app: AppHandle,
+    username: String,
+    password: String,
+) -> Result<(), String> {
+    let settings = get_proxy_settings(app.clone());
+    let url = settings
+        .url
+        .as_deref()
+        .ok_or("proxy URL required for credentials")?;
+    let identity = proxy::proxy_identity(url).map_err(|e| e.to_string())?;
+    proxy::set_credentials_for(&username, &password, &identity).map_err(|e| e.to_string())?;
+    proxy::configure(&app).map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub fn delete_proxy_credentials(app: AppHandle) -> Result<(), String> {
+    proxy::delete_credentials().map_err(|e| e.to_string())?;
+    proxy::configure(&app).map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub fn has_proxy_credentials() -> bool {
+    proxy::has_credentials()
+}

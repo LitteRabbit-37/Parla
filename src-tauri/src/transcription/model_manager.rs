@@ -154,10 +154,7 @@ impl ModelManager {
                     speed: 0.0,
                     accuracy: 0.0,
                     // Hypothese raisonnable : le fichier importe est multilingue.
-                    language_codes: WHISPER_FULL_LANGS
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect(),
+                    language_codes: WHISPER_FULL_LANGS.iter().map(|s| s.to_string()).collect(),
                 });
             }
         }
@@ -220,10 +217,16 @@ impl ModelManager {
             if flags.contains_key(id) {
                 return Err(anyhow!("telechargement deja en cours: {id}"));
             }
-            flags.insert(id.to_string(), Arc::new(std::sync::atomic::AtomicBool::new(false)));
+            flags.insert(
+                id.to_string(),
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            );
         }
         let result = self.download_impl(id).await;
         self.cancel_flags.lock().remove(id);
+        if let Err(error) = &result {
+            self.emit_error(id, crate::services::download::diagnostic(error));
+        }
         result
     }
 
@@ -246,13 +249,107 @@ impl ModelManager {
         // Efface un eventuel tmp precedent.
         let _ = fs::remove_file(&tmp);
 
-        let client = reqwest::Client::new();
-        let resp = client
-            .get(model.url)
-            .send()
-            .await
-            .with_context(|| format!("GET {}", model.url))?;
+        let url = url::Url::parse(model.url)?;
+        if crate::services::proxy::uses_system_proxy() {
+            return self
+                .download_system_worker(
+                    id,
+                    model.url,
+                    model.size_bytes,
+                    target,
+                    tmp,
+                    url,
+                    cancel,
+                )
+                .await;
+        }
+        let host = url.host_str().unwrap_or("?");
+        let apply_started = std::time::Instant::now();
+        info!(id, host, "Model download proxy setup started");
+        let (builder, route_diagnostic) =
+            crate::services::proxy::apply_for_url_with_diagnostic(reqwest::Client::builder(), &url)?;
+        let client = builder.build()?;
+        info!(
+            id,
+            host,
+            elapsed_ms = apply_started.elapsed().as_millis() as u64,
+            "Model download proxy setup completed"
+        );
+
+        let send_started = std::time::Instant::now();
+        info!(id, host, "Model download request started");
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            client.get(model.url).send(),
+        )
+        .await;
+        let resp = match response {
+            Ok(Ok(response)) => {
+                info!(
+                    id,
+                    host,
+                    elapsed_ms = send_started.elapsed().as_millis() as u64,
+                    success = true,
+                    "Model download request completed"
+                );
+                response
+            }
+            Ok(Err(error)) => {
+                let diagnostic = crate::services::download::diagnostic(&anyhow!(error.to_string()));
+                warn!(
+                    id,
+                    host,
+                    route_kind = route_diagnostic.kind,
+                    route_scheme = route_diagnostic.scheme.as_deref().unwrap_or("?"),
+                    route_host = route_diagnostic.host.as_deref().unwrap_or("?"),
+                    route_port = route_diagnostic.port.unwrap_or_default(),
+                    elapsed_ms = send_started.elapsed().as_millis() as u64,
+                    is_connect = error.is_connect(),
+                    is_timeout = error.is_timeout(),
+                    is_request = error.is_request(),
+                    is_body = error.is_body(),
+                    is_status = error.is_status(),
+                    error = %diagnostic,
+                    "Model download request failed"
+                );
+                return Err(anyhow!(diagnostic));
+            }
+            Err(_) => {
+                let diagnostic =
+                    "model download request timed out while waiting for proxy or server response after 30 seconds";
+                warn!(
+                    id,
+                    host,
+                    route_kind = route_diagnostic.kind,
+                    route_scheme = route_diagnostic.scheme.as_deref().unwrap_or("?"),
+                    route_host = route_diagnostic.host.as_deref().unwrap_or("?"),
+                    route_port = route_diagnostic.port.unwrap_or_default(),
+                    elapsed_ms = send_started.elapsed().as_millis() as u64,
+                    error = diagnostic,
+                    "Model download request timed out"
+                );
+                return Err(anyhow!(diagnostic));
+            }
+        };
         if !resp.status().is_success() {
+            let auth_schemes = if resp.status() == reqwest::StatusCode::PROXY_AUTHENTICATION_REQUIRED {
+                resp.headers()
+                    .get_all(reqwest::header::PROXY_AUTHENTICATE)
+                    .iter()
+                    .filter_map(|value| value.to_str().ok())
+                    .filter_map(|value| value.split_whitespace().next())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            } else {
+                String::new()
+            };
+            warn!(
+                id,
+                host,
+                status = %resp.status(),
+                proxy_auth_schemes = %auth_schemes,
+                "Model download HTTP request returned non-success"
+            );
             anyhow::bail!("HTTP {} depuis {}", resp.status(), model.url);
         }
         let total = resp.content_length().unwrap_or(model.size_bytes);
@@ -318,6 +415,70 @@ impl ModelManager {
         Ok(target)
     }
 
+    async fn download_system_worker(
+        &self,
+        id: &str,
+        model_url: &str,
+        model_size: u64,
+        target: PathBuf,
+        tmp: PathBuf,
+        url: url::Url,
+        cancel: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<PathBuf> {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        static SYSTEM_WORKER_BUSY: AtomicBool = AtomicBool::new(false);
+        if SYSTEM_WORKER_BUSY.swap(true, Ordering::Acquire) {
+            anyhow::bail!("system proxy model download already blocked");
+        }
+
+        let abandoned = Arc::new(AtomicBool::new(false));
+        let worker_abandoned = Arc::clone(&abandoned);
+        let worker_cancel = Arc::clone(&cancel);
+        let worker_app = self.app.clone();
+        let worker_id = id.to_owned();
+        let worker_url = model_url.to_owned();
+        let host = url.host_str().unwrap_or("?").to_owned();
+        let worker_host = host.clone();
+        let worker_log_id = worker_id.clone();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(16);
+
+        std::thread::spawn(move || {
+            info!(id = %worker_log_id, host = %worker_host, "System model download worker started");
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|error| anyhow!("system download runtime: {error}"))?;
+                runtime.block_on(system_download_worker(
+                    worker_app, worker_id, worker_url, model_size, target, tmp, url,
+                    worker_cancel, worker_abandoned, sender.clone(),
+                ))
+            }))
+            .unwrap_or_else(|_| Err(anyhow!("system download worker panicked")));
+            let _ = sender.try_send(SystemDownloadMessage::Result(result));
+            info!(id = %worker_log_id, host = %worker_host, "System model download worker exited");
+            SYSTEM_WORKER_BUSY.store(false, Ordering::Release);
+        });
+
+        loop {
+            match receiver.recv_timeout(std::time::Duration::from_secs(30)) {
+                Ok(SystemDownloadMessage::Activity) => continue,
+                Ok(SystemDownloadMessage::Result(result)) => return result,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    abandoned.store(true, Ordering::Release);
+                    let diagnostic =
+                        "model download request timed out while waiting for proxy or server response after 30 seconds";
+                    warn!(id, host = %host, error = diagnostic, "Model download request timed out");
+                    return Err(anyhow!(diagnostic));
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(anyhow!("system download worker exited without a result"));
+                }
+            }
+        }
+    }
+
     /// Annule un telechargement en cours. Idempotent.
     pub fn cancel_download(&self, id: &str) {
         if let Some(flag) = self.cancel_flags.lock().get(id) {
@@ -331,8 +492,7 @@ impl ModelManager {
         let model = find_model(id).ok_or_else(|| anyhow!("modele inconnu: {id}"))?;
         let path = self.model_path(model)?;
         if path.exists() {
-            fs::remove_file(&path)
-                .with_context(|| format!("remove {}", path.display()))?;
+            fs::remove_file(&path).with_context(|| format!("remove {}", path.display()))?;
             info!(id, "Modele supprime");
         }
         Ok(())
@@ -360,4 +520,76 @@ impl ModelManager {
         let path = self.model_path(model).ok()?;
         path.exists().then_some(path)
     }
+}
+
+enum SystemDownloadMessage {
+    Activity,
+    Result(Result<PathBuf>),
+}
+
+async fn system_download_worker(
+    app: AppHandle,
+    id: String,
+    _model_url: String,
+    model_size: u64,
+    target: PathBuf,
+    tmp: PathBuf,
+    url: url::Url,
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+    abandoned: Arc<std::sync::atomic::AtomicBool>,
+    sender: std::sync::mpsc::SyncSender<SystemDownloadMessage>,
+) -> Result<PathBuf> {
+    let app_for_worker = app.clone();
+    let id_for_worker = id.clone();
+    let tmp_for_worker = tmp.clone();
+    let cancel_for_worker = cancel.clone();
+    let abandoned_for_worker = abandoned.clone();
+    let downloaded = crate::services::winhttp_download::download(
+        &url,
+        model_size,
+        move |chunk, downloaded, total| {
+            if cancel_for_worker.load(std::sync::atomic::Ordering::SeqCst)
+                || abandoned_for_worker.load(std::sync::atomic::Ordering::Acquire)
+            {
+                return false;
+            }
+            let mut file = match std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&tmp_for_worker)
+            {
+                Ok(file) => file,
+                Err(_) => return false,
+            };
+            use std::io::Write;
+            if file.write_all(chunk).is_err() {
+                return false;
+            }
+            let _ = sender.try_send(SystemDownloadMessage::Activity);
+            let _ = app_for_worker.emit("model:download:progress", DownloadProgress {
+                id: id_for_worker.clone(),
+                downloaded,
+                total,
+            });
+            true
+        },
+    )?;
+    if abandoned.load(std::sync::atomic::Ordering::Acquire) {
+        let _ = fs::remove_file(&tmp);
+        return Err(anyhow!("system download abandoned"));
+    }
+    let _ = app.emit("model:download:progress", DownloadProgress {
+        id: id.clone(),
+        downloaded,
+        total: model_size,
+    });
+    fs::rename(&tmp, &target)
+        .with_context(|| format!("rename {} -> {}", tmp.display(), target.display()))?;
+    let _ = app.emit("model:download:complete", DownloadComplete {
+        id,
+        path: target.to_string_lossy().into_owned(),
+    });
+    Ok(target)
+
+
 }
