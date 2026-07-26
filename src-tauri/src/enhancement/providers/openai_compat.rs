@@ -24,12 +24,11 @@ use serde_json::{json, Value};
 
 use crate::enhancement::provider::{EnhancementRequest, EnhancementResponse};
 
-/// Appel chat completion OpenAI-compatible.
-pub async fn chat_completion(
+pub fn build_request(
     endpoint: &str,
     api_key: &str,
     req: &EnhancementRequest,
-) -> Result<EnhancementResponse> {
+) -> Result<crate::transcription::cloud::http::HttpRequest> {
     let mut body = serde_json::Map::new();
     body.insert("model".into(), json!(req.model));
     body.insert(
@@ -48,34 +47,18 @@ pub async fn chat_completion(
             body.insert(k.clone(), v.clone());
         }
     }
+    let request = crate::transcription::cloud::http::HttpRequest::new("POST", endpoint)
+        .header("content-type", "application/json")
+        .body(serde_json::to_vec(&Value::Object(body))?);
+    Ok(if api_key.is_empty() {
+        request
+    } else {
+        request.header("authorization", format!("Bearer {api_key}"))
+    })
+}
 
-    let url = reqwest::Url::parse(endpoint).map_err(|e| anyhow!("endpoint: {e}"))?;
-    let client = crate::services::proxy::apply_for_url(reqwest::Client::builder(), &url)?
-        .timeout(req.timeout)
-        .build()
-        .map_err(|e| anyhow!("http client: {e}"))?;
-
-    let mut builder = client.post(endpoint).json(&Value::Object(body));
-    if !api_key.is_empty() {
-        builder = builder.bearer_auth(api_key);
-    }
-
-    let resp = builder.send().await.map_err(map_http_err)?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        let truncated: String = body.chars().take(500).collect();
-        if status.as_u16() == 429 {
-            return Err(anyhow!("rate_limit ({status}): {truncated}"));
-        }
-        if status.is_server_error() {
-            return Err(anyhow!("server_error ({status}): {truncated}"));
-        }
-        return Err(anyhow!("http {status}: {truncated}"));
-    }
-
-    let json: Value = resp.json().await.map_err(|e| anyhow!("json parse: {e}"))?;
+pub fn parse_response(body: &[u8]) -> Result<EnhancementResponse> {
+    let json: Value = serde_json::from_slice(body).map_err(|e| anyhow!("json parse: {e}"))?;
     let content = json
         .pointer("/choices/0/message/content")
         .and_then(|v| v.as_str())
@@ -85,12 +68,63 @@ pub async fn chat_completion(
     })
 }
 
-fn map_http_err(e: reqwest::Error) -> anyhow::Error {
-    if e.is_timeout() {
-        return anyhow!("timeout: {e}");
+/// Appel chat completion OpenAI-compatible.
+pub async fn chat_completion(
+    endpoint: &str,
+    api_key: &str,
+    req: &EnhancementRequest,
+) -> Result<EnhancementResponse> {
+    let request = build_request(endpoint, api_key, req)?;
+    let response = crate::transcription::cloud::http::BatchHttpClient::new(endpoint)?
+        .send_with_timeout(request.clone(), req.timeout)
+        .await?;
+    if !(200..300).contains(&response.status) {
+        let detail = crate::transcription::cloud::http::http_status_error(
+            response.status,
+            &response.body,
+            &request,
+        );
+        if response.status == 429 {
+            return Err(anyhow!("rate_limit ({}){}", response.status, detail));
+        }
+        if response.status >= 500 {
+            return Err(anyhow!("server_error ({}){}", response.status, detail));
+        }
+        return Err(detail);
     }
-    if e.is_connect() {
-        return anyhow!("network_error: {e}");
+
+    parse_response(&response.body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::enhancement::provider::{EnhancementRequest, ReasoningConfig};
+    use std::time::Duration;
+
+    #[test]
+    fn request_and_response_match_openai_shape() {
+        let req = EnhancementRequest {
+            system_prompt: "system".into(),
+            user_message: "user".into(),
+            model: "gpt-test".into(),
+            temperature: 0.2,
+            reasoning: ReasoningConfig::default(),
+            timeout: Duration::from_secs(1),
+            endpoint_override: None,
+        };
+        let request = build_request("https://example.test/chat", "key", &req).unwrap();
+        assert_eq!(
+            request.headers[1],
+            ("authorization".into(), "Bearer key".into())
+        );
+        let body: Value = serde_json::from_slice(&request.body).unwrap();
+        assert_eq!(body["messages"][1]["content"], "user");
+        assert_eq!(
+            parse_response(br#"{"choices":[{"message":{"content":"done"}}]}"#)
+                .unwrap()
+                .text,
+            "done"
+        );
     }
-    anyhow!("http: {e}")
 }

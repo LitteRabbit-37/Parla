@@ -1,10 +1,10 @@
 //! Small synchronous WinHTTP transport used when Windows owns proxy routing.
 
 use anyhow::{anyhow, Result};
+use std::time::Duration;
 use windows::core::{Error as WinError, PCWSTR};
 use windows::Win32::Networking::WinHttp::*;
 
-const TOTAL_TIMEOUT_MS: i32 = 120_000;
 const CONNECT_TIMEOUT_MS: i32 = 15_000;
 const READ_SIZE: usize = 64 * 1024;
 
@@ -18,6 +18,7 @@ pub fn request(
     url: &str,
     headers: &[(String, String)],
     body: &[u8],
+    timeout: Duration,
 ) -> Result<Response> {
     let url = url::Url::parse(url).map_err(|e| {
         let detail = crate::services::download::sanitize_message(&e.to_string());
@@ -54,6 +55,7 @@ pub fn request(
             url.port_or_known_default().unwrap_or(443),
             url.scheme().eq_ignore_ascii_case("https"),
             body,
+            timeout,
         )
     }
 }
@@ -66,6 +68,7 @@ unsafe fn request_inner(
     port: u16,
     secure: bool,
     body: &[u8],
+    timeout: Duration,
 ) -> Result<Response> {
     let session = WinHttpOpen(
         PCWSTR::null(),
@@ -78,12 +81,16 @@ unsafe fn request_inner(
         return Err(win_error("open session"));
     }
     let session = HandleGuard(session);
+    let timeout_ms = timeout
+        .as_millis()
+        .max((!timeout.is_zero()) as u128)
+        .min(i32::MAX as u128) as i32;
     WinHttpSetTimeouts(
         session.0,
         CONNECT_TIMEOUT_MS,
-        TOTAL_TIMEOUT_MS,
-        TOTAL_TIMEOUT_MS,
-        TOTAL_TIMEOUT_MS,
+        timeout_ms,
+        timeout_ms,
+        timeout_ms,
     )?;
     let policy = WINHTTP_AUTOLOGON_SECURITY_LEVEL_MEDIUM;
     WinHttpSetOption(

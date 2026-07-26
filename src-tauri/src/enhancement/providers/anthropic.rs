@@ -36,6 +36,45 @@ const MODELS: &[&str] = &[
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const DEFAULT_MAX_TOKENS: u32 = 4096;
 
+pub fn build_request(
+    endpoint: &str,
+    api_key: &str,
+    req: &EnhancementRequest,
+) -> Result<crate::transcription::cloud::http::HttpRequest> {
+    let body = json!({
+        "model": req.model,
+        "system": req.system_prompt,
+        "messages": [{"role": "user", "content": req.user_message}],
+        "max_tokens": DEFAULT_MAX_TOKENS,
+        "temperature": req.temperature,
+    });
+    Ok(
+        crate::transcription::cloud::http::HttpRequest::new("POST", endpoint)
+            .header("x-api-key", api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("content-type", "application/json")
+            .body(serde_json::to_vec(&body)?),
+    )
+}
+
+pub fn parse_response(body: &[u8]) -> Result<EnhancementResponse> {
+    let json: Value = serde_json::from_slice(body).map_err(|e| anyhow!("json parse: {e}"))?;
+    let mut out = String::new();
+    if let Some(arr) = json.get("content").and_then(|v| v.as_array()) {
+        for item in arr {
+            if item.get("type").and_then(|v| v.as_str()) == Some("text") {
+                if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
+                    out.push_str(t);
+                }
+            }
+        }
+    }
+    if out.is_empty() {
+        return Err(anyhow!("reponse Anthropic sans content.text"));
+    }
+    Ok(EnhancementResponse { text: out })
+}
+
 #[async_trait]
 impl LLMProvider for AnthropicProvider {
     fn id(&self) -> &'static str {
@@ -59,66 +98,62 @@ impl LLMProvider for AnthropicProvider {
         api_key: &str,
         req: &EnhancementRequest,
     ) -> Result<EnhancementResponse> {
-        let body = json!({
-            "model": req.model,
-            "system": req.system_prompt,
-            "messages": [{"role": "user", "content": req.user_message}],
-            "max_tokens": DEFAULT_MAX_TOKENS,
-            "temperature": req.temperature,
-        });
-
-        let url = reqwest::Url::parse(self.endpoint())?;
-        let client = crate::services::proxy::apply_for_url(reqwest::Client::builder(), &url)?
-            .timeout(req.timeout)
-            .build()
-            .map_err(|e| anyhow!("http client: {e}"))?;
-
-        let resp = client
-            .post(self.endpoint())
-            .header("x-api-key", api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    anyhow!("timeout: {e}")
-                } else if e.is_connect() {
-                    anyhow!("network_error: {e}")
-                } else {
-                    anyhow!("http: {e}")
-                }
-            })?;
-
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            let truncated: String = body.chars().take(500).collect();
-            if status.as_u16() == 429 {
-                return Err(anyhow!("rate_limit ({status}): {truncated}"));
+        let request = build_request(self.endpoint(), api_key, req)?;
+        let response = crate::transcription::cloud::http::BatchHttpClient::new(self.endpoint())?
+            .send_with_timeout(request.clone(), req.timeout)
+            .await?;
+        if !(200..300).contains(&response.status) {
+            let detail = crate::transcription::cloud::http::http_status_error(
+                response.status,
+                &response.body,
+                &request,
+            );
+            if response.status == 429 {
+                return Err(anyhow!("rate_limit ({}){}", response.status, detail));
             }
-            if status.is_server_error() {
-                return Err(anyhow!("server_error ({status}): {truncated}"));
+            if response.status >= 500 {
+                return Err(anyhow!("server_error ({}){}", response.status, detail));
             }
-            return Err(anyhow!("http {status}: {truncated}"));
+            return Err(detail);
         }
 
-        let json: Value = resp.json().await.map_err(|e| anyhow!("json parse: {e}"))?;
-        // Concatene tous les blocs content de type text (VoiceInk ne prend que
-        // le premier mais Anthropic peut en renvoyer plusieurs).
-        let mut out = String::new();
-        if let Some(arr) = json.get("content").and_then(|v| v.as_array()) {
-            for item in arr {
-                if item.get("type").and_then(|v| v.as_str()) == Some("text") {
-                    if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
-                        out.push_str(t);
-                    }
-                }
-            }
+        parse_response(&response.body)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::enhancement::provider::{EnhancementRequest, ReasoningConfig};
+    use std::time::Duration;
+
+    fn request() -> EnhancementRequest {
+        EnhancementRequest {
+            system_prompt: "system".into(),
+            user_message: "user".into(),
+            model: "claude-test".into(),
+            temperature: 0.3,
+            reasoning: ReasoningConfig::default(),
+            timeout: Duration::from_secs(1),
+            endpoint_override: None,
         }
-        if out.is_empty() {
-            return Err(anyhow!("reponse Anthropic sans content.text"));
-        }
-        Ok(EnhancementResponse { text: out })
+    }
+
+    #[test]
+    fn request_and_response_match_messages_api() {
+        let request =
+            build_request("https://example.test/v1/messages", "secret", &request()).unwrap();
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.headers[0], ("x-api-key".into(), "secret".into()));
+        let body: Value = serde_json::from_slice(&request.body).unwrap();
+        assert_eq!(body["messages"][0]["content"], "user");
+        assert_eq!(
+            parse_response(
+                br#"{"content":[{"type":"text","text":"one"},{"type":"text","text":"two"}]}"#
+            )
+            .unwrap()
+            .text,
+            "onetwo"
+        );
     }
 }

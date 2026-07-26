@@ -84,6 +84,14 @@ impl BatchHttpClient {
     }
 
     pub async fn send(&self, request: HttpRequest) -> Result<HttpResponse> {
+        self.send_with_timeout(request, BATCH_TIMEOUT).await
+    }
+
+    pub async fn send_with_timeout(
+        &self,
+        request: HttpRequest,
+        timeout: Duration,
+    ) -> Result<HttpResponse> {
         let url = Url::parse(&request.url).map_err(|e| {
             let detail = crate::services::download::sanitize_message(&e.to_string());
             anyhow!("http endpoint: {detail}")
@@ -103,6 +111,7 @@ impl BatchHttpClient {
                             &request.url,
                             &request.headers,
                             &request.body,
+                            timeout,
                         )?;
                         Ok(HttpResponse {
                             status: response.status,
@@ -123,7 +132,7 @@ impl BatchHttpClient {
             | crate::services::proxy::ProxyRoute::Explicit { .. } => {
                 let client =
                     crate::services::proxy::apply_for_url(reqwest::Client::builder(), &url)?
-                        .timeout(BATCH_TIMEOUT)
+                        .timeout(timeout)
                         .connect_timeout(CONNECT_TIMEOUT)
                         .build()?;
                 let mut builder = client

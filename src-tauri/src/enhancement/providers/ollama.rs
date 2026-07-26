@@ -27,6 +27,32 @@ const DEFAULT_BASE_URL: &str = "http://localhost:11434";
 const STORE_FILE: &str = "parla.settings.json";
 const KEY_BASE_URL: &str = "ollama_base_url";
 
+pub fn list_models_url(base_url: &str) -> String {
+    format!("{}/api/tags", base_url.trim_end_matches('/'))
+}
+
+pub fn build_generate_request(
+    base_url: &str,
+    req: &EnhancementRequest,
+) -> Result<crate::transcription::cloud::http::HttpRequest> {
+    let url = format!("{}/api/generate", base_url.trim_end_matches('/'));
+    let body = json!({ "model": req.model, "prompt": req.user_message, "system": req.system_prompt, "options": { "temperature": req.temperature }, "stream": false });
+    Ok(
+        crate::transcription::cloud::http::HttpRequest::new("POST", &url)
+            .header("content-type", "application/json")
+            .body(serde_json::to_vec(&body)?),
+    )
+}
+
+pub fn parse_generate_response(body: &[u8]) -> Result<EnhancementResponse> {
+    let json: Value = serde_json::from_slice(body).map_err(|e| anyhow!("json: {e}"))?;
+    let text = json
+        .get("response")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("reponse Ollama sans champ response"))?;
+    Ok(EnhancementResponse { text: text.into() })
+}
+
 pub fn get_base_url(app: &tauri::AppHandle) -> String {
     app.store(STORE_FILE)
         .ok()
@@ -55,18 +81,21 @@ pub fn set_base_url(app: &tauri::AppHandle, url: &str) -> Result<()> {
 
 /// Liste les modeles Ollama installes sur la machine.
 pub async fn list_models(base_url: &str) -> Result<Vec<String>> {
-    let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
-    let parsed_url = reqwest::Url::parse(&url)?;
-    let resp = crate::services::proxy::apply_for_url(reqwest::Client::builder(), &parsed_url)?
-        .build()?
-        .get(&url)
-        .send()
+    let url = list_models_url(base_url);
+    let request = crate::transcription::cloud::http::HttpRequest::new("GET", &url);
+    let response = crate::transcription::cloud::http::BatchHttpClient::new(&url)?
+        .send(request.clone())
         .await
         .map_err(|e| anyhow!("ollama list: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(anyhow!("ollama list http {}", resp.status()));
+    if !(200..300).contains(&response.status) {
+        return Err(crate::transcription::cloud::http::http_status_error(
+            response.status,
+            &response.body,
+            &request,
+        ));
     }
-    let json: Value = resp.json().await.map_err(|e| anyhow!("ollama json: {e}"))?;
+    let json: Value =
+        serde_json::from_slice(&response.body).map_err(|e| anyhow!("ollama json: {e}"))?;
     let mut names = Vec::new();
     if let Some(arr) = json.get("models").and_then(|v| v.as_array()) {
         for m in arr {
@@ -111,43 +140,55 @@ impl LLMProvider for OllamaProvider {
             .endpoint_override
             .clone()
             .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
-        let url = format!("{}/api/generate", base.trim_end_matches('/'));
-        let body = json!({
-            "model": req.model,
-            "prompt": req.user_message,
-            "system": req.system_prompt,
-            "options": { "temperature": req.temperature },
-            "stream": false,
-        });
-        let parsed_url = reqwest::Url::parse(&url)?;
-        let client =
-            crate::services::proxy::apply_for_url(reqwest::Client::builder(), &parsed_url)?
-                .timeout(req.timeout)
-                .build()
-                .map_err(|e| anyhow!("http client: {e}"))?;
-        let resp = client.post(&url).json(&body).send().await.map_err(|e| {
-            if e.is_timeout() {
-                anyhow!("timeout: {e}")
-            } else if e.is_connect() {
-                anyhow!("network_error: ollama inaccessible: {e}")
-            } else {
-                anyhow!("http: {e}")
+        let request = build_generate_request(&base, req)?;
+        let response = crate::transcription::cloud::http::BatchHttpClient::new(&request.url)?
+            .send_with_timeout(request.clone(), req.timeout)
+            .await?;
+        if !(200..300).contains(&response.status) {
+            let detail = crate::transcription::cloud::http::http_status_error(
+                response.status,
+                &response.body,
+                &request,
+            );
+            if response.status == 404 {
+                return Err(anyhow!("ollama model introuvable: {detail}"));
             }
-        })?;
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            let truncated: String = body.chars().take(500).collect();
-            if status.as_u16() == 404 {
-                return Err(anyhow!("ollama model introuvable: {truncated}"));
-            }
-            return Err(anyhow!("http {status}: {truncated}"));
+            return Err(detail);
         }
-        let json: Value = resp.json().await.map_err(|e| anyhow!("json: {e}"))?;
-        let text = json
-            .get("response")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow!("reponse Ollama sans champ response"))?;
-        Ok(EnhancementResponse { text: text.into() })
+        parse_generate_response(&response.body)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::enhancement::provider::ReasoningConfig;
+    use std::time::Duration;
+
+    #[test]
+    fn discovery_and_generation_use_normalized_routes() {
+        assert_eq!(
+            list_models_url("http://localhost:11434/"),
+            "http://localhost:11434/api/tags"
+        );
+        let req = EnhancementRequest {
+            system_prompt: "system".into(),
+            user_message: "user".into(),
+            model: "mistral".into(),
+            temperature: 0.3,
+            reasoning: ReasoningConfig::default(),
+            timeout: Duration::from_secs(1),
+            endpoint_override: None,
+        };
+        let request = build_generate_request("http://localhost:11434/", &req).unwrap();
+        assert_eq!(request.url, "http://localhost:11434/api/generate");
+        let body: Value = serde_json::from_slice(&request.body).unwrap();
+        assert_eq!(body["stream"], false);
+        assert_eq!(
+            parse_generate_response(br#"{"response":"done"}"#)
+                .unwrap()
+                .text,
+            "done"
+        );
     }
 }
