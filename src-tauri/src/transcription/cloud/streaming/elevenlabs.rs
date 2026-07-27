@@ -12,13 +12,12 @@
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use super::session::{
-    connect_ws, drain_ws_messages, i16_to_base64, StreamingChannels, StreamingConfig,
-    StreamingEvent, StreamingProvider,
+    connect_streaming_socket, i16_to_base64, StreamingChannels, StreamingConfig, StreamingEvent,
+    StreamingMessage, StreamingProvider, StreamingSocketRead,
 };
 
 pub struct ElevenLabsStreaming;
@@ -51,13 +50,16 @@ impl StreamingProvider for ElevenLabsStreaming {
         let mut req = url.into_client_request()?;
         req.headers_mut().insert("xi-api-key", api_key.parse()?);
 
-        let ws_stream = connect_ws(req).await?;
-        let (mut write, mut read) = ws_stream.split();
+        let socket = connect_streaming_socket(req).await?;
+        let super::session::StreamingSocket {
+            mut write,
+            mut read,
+        } = socket;
 
         // Handshake : attend session_started.
         loop {
             match read.next().await {
-                Some(Ok(Message::Text(t))) => {
+                Ok(Some(StreamingMessage::Text(t))) => {
                     let json: Value = serde_json::from_str(&t)?;
                     match json.get("message_type").and_then(|v| v.as_str()) {
                         Some("session_started") => break,
@@ -72,9 +74,9 @@ impl StreamingProvider for ElevenLabsStreaming {
                         _ => continue,
                     }
                 }
-                Some(Ok(_)) => continue,
-                Some(Err(e)) => return Err(anyhow!("ws read: {e}")),
-                None => return Err(anyhow!("ws closed during handshake")),
+                Ok(Some(_)) => continue,
+                Err(e) => return Err(anyhow!("ws read: {e}")),
+                Ok(None) => return Err(anyhow!("ws closed during handshake")),
             }
         }
         on_event(StreamingEvent::SessionStarted);
@@ -97,7 +99,7 @@ impl StreamingProvider for ElevenLabsStreaming {
                             "commit": false,
                             "sample_rate": 16000,
                         });
-                        let _ = write.send(Message::Text(msg.to_string().into())).await;
+                        let _ = write.send_text(msg.to_string()).await;
                     }
                     let commit = json!({
                         "message_type": "input_audio_chunk",
@@ -105,8 +107,8 @@ impl StreamingProvider for ElevenLabsStreaming {
                         "commit": true,
                         "sample_rate": 16000,
                     });
-                    let _ = write.send(Message::Text(commit.to_string().into())).await;
-                    let final_text = drain_after_commit(&mut read, &mut committed_text, &on_event).await;
+                    let _ = write.send_text(commit.to_string()).await;
+                    let final_text = drain_after_commit(read.as_mut(), &mut committed_text, &on_event).await;
                     let _ = write.close().await;
                     return Ok(final_text);
                 }
@@ -119,7 +121,7 @@ impl StreamingProvider for ElevenLabsStreaming {
                                 "commit": false,
                                 "sample_rate": 16000,
                             });
-                            if let Err(e) = write.send(Message::Text(msg.to_string().into())).await {
+                            if let Err(e) = write.send_text(msg.to_string()).await {
                                 return Err(anyhow!("ws send: {e}"));
                             }
                         }
@@ -128,11 +130,10 @@ impl StreamingProvider for ElevenLabsStreaming {
                 }
                 msg = read.next() => {
                     match msg {
-                        Some(Ok(Message::Text(t))) => handle_text(&t, &mut committed_text, &on_event),
-                        Some(Ok(Message::Close(_))) => return Ok(committed_text),
-                        Some(Ok(_)) => {}
-                        Some(Err(e)) => return Err(anyhow!("ws read: {e}")),
-                        None => return Ok(committed_text),
+                        Ok(Some(StreamingMessage::Text(t))) => handle_text(&t, &mut committed_text, &on_event),
+                        Ok(Some(StreamingMessage::Close)) | Ok(None) => return Ok(committed_text),
+                        Ok(Some(_)) => {}
+                        Err(e) => return Err(anyhow!("ws read: {e}")),
                     }
                 }
             }
@@ -140,18 +141,24 @@ impl StreamingProvider for ElevenLabsStreaming {
     }
 }
 
-async fn drain_after_commit<S>(
-    read: &mut S,
+async fn drain_after_commit(
+    read: &mut dyn StreamingSocketRead,
     committed: &mut String,
     on_event: &(dyn Fn(StreamingEvent) + Send + Sync),
-) -> String
-where
-    S: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
-{
-    drain_ws_messages(read, std::time::Duration::from_secs(5), |t| {
-        handle_text(t, committed, on_event)
-    })
-    .await;
+) -> String {
+    let timeout = std::time::Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + timeout;
+    while tokio::time::Instant::now() < deadline {
+        let remaining = deadline - tokio::time::Instant::now();
+        match tokio::time::timeout(remaining, read.next()).await {
+            Ok(Ok(Some(StreamingMessage::Text(text)))) => handle_text(&text, committed, on_event),
+            Ok(Ok(Some(StreamingMessage::Binary(_))))
+            | Ok(Ok(Some(StreamingMessage::Close)))
+            | Ok(Ok(None))
+            | Ok(Err(_))
+            | Err(_) => break,
+        }
+    }
     committed.trim().to_string()
 }
 

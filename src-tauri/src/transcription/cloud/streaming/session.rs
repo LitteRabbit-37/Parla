@@ -13,11 +13,11 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
+use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::handshake::client::Request as WsRequest;
 
 pub(crate) trait ProxyIo: AsyncRead + AsyncWrite + Unpin + Send {}
@@ -25,14 +25,103 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> ProxyIo for T {}
 type BoxedIo = Box<dyn ProxyIo>;
 type WsStream = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<BoxedIo>>;
 
+/// Message type shared by all streaming transports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StreamingMessage {
+    Text(String),
+    Binary(Vec<u8>),
+    Close,
+}
+
+/// Object-safe asynchronous write side of a streaming socket.
+#[async_trait]
+pub trait StreamingSocketWrite: Send {
+    async fn send_text(&mut self, text: String) -> anyhow::Result<()>;
+    async fn send_binary(&mut self, data: Vec<u8>) -> anyhow::Result<()>;
+    async fn close(&mut self) -> anyhow::Result<()>;
+}
+
+/// Object-safe asynchronous read side of a streaming socket.
+#[async_trait]
+pub trait StreamingSocketRead: Send {
+    async fn next(&mut self) -> anyhow::Result<Option<StreamingMessage>>;
+}
+
+/// Provider-facing transport-neutral WebSocket API.
+pub struct StreamingSocket {
+    pub write: Box<dyn StreamingSocketWrite>,
+    pub read: Box<dyn StreamingSocketRead>,
+}
+
+struct TungsteniteWrite {
+    inner: futures_util::stream::SplitSink<WsStream, tokio_tungstenite::tungstenite::Message>,
+}
+
+struct TungsteniteRead {
+    inner: futures_util::stream::SplitStream<WsStream>,
+}
+
+#[async_trait]
+impl StreamingSocketWrite for TungsteniteWrite {
+    async fn send_text(&mut self, text: String) -> anyhow::Result<()> {
+        self.inner
+            .send(tokio_tungstenite::tungstenite::Message::Text(text.into()))
+            .await?;
+        Ok(())
+    }
+
+    async fn send_binary(&mut self, data: Vec<u8>) -> anyhow::Result<()> {
+        self.inner
+            .send(tokio_tungstenite::tungstenite::Message::Binary(data.into()))
+            .await?;
+        Ok(())
+    }
+
+    async fn close(&mut self) -> anyhow::Result<()> {
+        self.inner
+            .send(tokio_tungstenite::tungstenite::Message::Close(None))
+            .await?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl StreamingSocketRead for TungsteniteRead {
+    async fn next(&mut self) -> anyhow::Result<Option<StreamingMessage>> {
+        loop {
+            match self.inner.next().await.transpose()? {
+                Some(tokio_tungstenite::tungstenite::Message::Text(text)) => {
+                    return Ok(Some(StreamingMessage::Text(text.to_string())));
+                }
+                Some(tokio_tungstenite::tungstenite::Message::Binary(data)) => {
+                    return Ok(Some(StreamingMessage::Binary(data.to_vec())));
+                }
+                Some(tokio_tungstenite::tungstenite::Message::Close(_)) => {
+                    return Ok(Some(StreamingMessage::Close));
+                }
+                None => return Ok(None),
+                Some(tokio_tungstenite::tungstenite::Message::Ping(_))
+                | Some(tokio_tungstenite::tungstenite::Message::Pong(_))
+                | Some(tokio_tungstenite::tungstenite::Message::Frame(_)) => {}
+            }
+        }
+    }
+}
+
+fn tungstenite_socket(stream: WsStream) -> StreamingSocket {
+    let (write, read) = stream.split();
+    StreamingSocket {
+        write: Box::new(TungsteniteWrite { inner: write }),
+        read: Box::new(TungsteniteRead { inner: read }),
+    }
+}
+
 fn streaming_connection_plan(
     route: &crate::services::proxy::ProxyRoute,
 ) -> anyhow::Result<&'static str> {
     match route {
         crate::services::proxy::ProxyRoute::Direct => Ok("direct"),
-        crate::services::proxy::ProxyRoute::System => Err(anyhow!(
-            "Windows system proxy is not supported for streaming WebSocket connections"
-        )),
+        crate::services::proxy::ProxyRoute::System => Ok("winhttp"),
         crate::services::proxy::ProxyRoute::Explicit { url, .. } => {
             let proxy = url::Url::parse(url).map_err(|error| {
                 let diagnostic = crate::services::download::sanitize_message(&error.to_string());
@@ -46,6 +135,18 @@ fn streaming_connection_plan(
             }
         }
     }
+}
+
+fn dispatch_connection(route: &crate::services::proxy::ProxyRoute) -> &'static str {
+    match route {
+        crate::services::proxy::ProxyRoute::System => "winhttp",
+        _ => "tungstenite",
+    }
+}
+
+fn connect_timeout_diagnostic(url: &str, timeout: Duration) -> String {
+    let url = crate::services::download::sanitize_message(url);
+    format!("timeout: ws connect {url} (>{}s)", timeout.as_secs())
 }
 
 fn http_connect_request(
@@ -67,6 +168,19 @@ fn http_connect_request(
 mod routing_tests {
     use super::*;
     use crate::services::proxy::{ProxyCredentials, ProxyRoute};
+    use std::collections::VecDeque;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+    struct MockRead {
+        messages: VecDeque<anyhow::Result<Option<StreamingMessage>>>,
+    }
+
+    #[async_trait]
+    impl StreamingSocketRead for MockRead {
+        async fn next(&mut self) -> anyhow::Result<Option<StreamingMessage>> {
+            self.messages.pop_front().unwrap_or_else(|| Ok(None))
+        }
+    }
 
     #[test]
     fn connection_plan_covers_direct_and_explicit_routes() {
@@ -104,12 +218,20 @@ mod routing_tests {
     }
 
     #[test]
-    fn system_route_fails_clearly_without_exposing_credentials() {
-        let error = streaming_connection_plan(&ProxyRoute::System).unwrap_err();
-        let message = error.to_string();
-        assert!(message.contains("Windows system proxy is not supported"));
-        assert!(!message.contains("secret"));
-        assert!(!message.contains("user"));
+    fn system_route_selects_native_backend_without_fallback() {
+        assert_eq!(dispatch_connection(&ProxyRoute::System), "winhttp");
+        assert_ne!(dispatch_connection(&ProxyRoute::System), "tungstenite");
+    }
+
+    #[test]
+    fn system_dispatch_failure_diagnostic_is_bounded_and_has_no_fallback() {
+        let route = ProxyRoute::System;
+        let diagnostic =
+            connect_timeout_diagnostic("wss://service.example/stream", WS_CONNECT_TIMEOUT);
+        assert_eq!(dispatch_connection(&route), "winhttp");
+        assert!(!diagnostic.contains("tungstenite"));
+        assert!(diagnostic.contains("timeout: ws connect"));
+        assert!(diagnostic.contains("(>10s)"));
     }
 
     #[test]
@@ -159,6 +281,41 @@ mod routing_tests {
     }
 
     #[tokio::test]
+    async fn drain_uses_transport_neutral_read_contract() {
+        let mut read = MockRead {
+            messages: VecDeque::from([
+                Ok(Some(StreamingMessage::Text("first".into()))),
+                Ok(Some(StreamingMessage::Binary(vec![1, 2]))),
+                Ok(None),
+                Ok(Some(StreamingMessage::Text("after eof".into()))),
+            ]),
+        };
+        let mut text = Vec::new();
+        drain_ws_messages(&mut read, Duration::from_secs(1), |value| {
+            text.push(value.to_owned())
+        })
+        .await;
+        assert_eq!(text, ["first"]);
+    }
+
+    #[tokio::test]
+    async fn drain_stops_on_explicit_close() {
+        let mut read = MockRead {
+            messages: VecDeque::from([
+                Ok(Some(StreamingMessage::Text("before close".into()))),
+                Ok(Some(StreamingMessage::Close)),
+                Ok(Some(StreamingMessage::Text("after close".into()))),
+            ]),
+        };
+        let mut text = Vec::new();
+        drain_ws_messages(&mut read, Duration::from_secs(1), |value| {
+            text.push(value.to_owned())
+        })
+        .await;
+        assert_eq!(text, ["before close"]);
+    }
+
+    #[tokio::test]
     async fn connect_timeout_cancels_handshake_against_controlled_listener() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -186,7 +343,7 @@ pub const WS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Etablit une connexion WebSocket avec un timeout de handshake.
 /// Remplace l'appel direct a `tokio_tungstenite::connect_async` pour eviter
 /// les hangs indefinis si le handshake bloque (firewall, proxy, DNS lent).
-pub async fn connect_ws(req: WsRequest) -> anyhow::Result<WsStream> {
+async fn connect_ws(req: WsRequest) -> anyhow::Result<WsStream> {
     connect_ws_with_timeout(req, WS_CONNECT_TIMEOUT).await
 }
 
@@ -195,8 +352,8 @@ async fn connect_ws_with_timeout(req: WsRequest, timeout: Duration) -> anyhow::R
     match tokio::time::timeout(timeout, connect_ws_inner(req)).await {
         Ok(result) => result,
         Err(_) => Err(anyhow!(
-            "timeout: ws connect {url_for_err} (>{}s)",
-            timeout.as_secs()
+            "{}",
+            connect_timeout_diagnostic(&url_for_err, timeout)
         )),
     }
 }
@@ -300,9 +457,7 @@ async fn connect_ws_inner(req: WsRequest) -> anyhow::Result<WsStream> {
             }
         }
         crate::services::proxy::ProxyRoute::System => {
-            return Err(anyhow!(
-                "Windows system proxy is not supported for streaming WebSocket connections"
-            ));
+            return Err(anyhow!("System route must use connect_streaming_socket"));
         }
     };
     tokio_tungstenite::client_async_tls_with_config(req, socket, None, None)
@@ -311,14 +466,22 @@ async fn connect_ws_inner(req: WsRequest) -> anyhow::Result<WsStream> {
         .map_err(|e| anyhow!("ws connect {url_for_err}: {e}"))
 }
 
-/// Variante prenant directement une string URL, pour les providers qui n'ont
-/// pas besoin d'ajouter de headers custom avant le connect.
-pub async fn connect_ws_url(url: &str) -> anyhow::Result<WsStream> {
-    let url_for_err = crate::services::download::sanitize_message(url);
-    let req = url
-        .into_client_request()
-        .map_err(|e| anyhow!("ws url parse {url_for_err}: {e}"))?;
-    connect_ws(req).await
+/// Connect using provider-neutral transport. System routing is delegated to
+/// WinHTTP, which owns automatic proxy/WPAD and integrated authentication.
+pub async fn connect_streaming_socket(req: WsRequest) -> anyhow::Result<StreamingSocket> {
+    let target = url::Url::parse(&req.uri().to_string()).context("WebSocket URL")?;
+    let route = crate::services::proxy::route_for_url(&target)?;
+    if dispatch_connection(&route) == "winhttp" {
+        #[cfg(windows)]
+        {
+            return crate::services::winhttp::connect_websocket(&req, WS_CONNECT_TIMEOUT).await;
+        }
+        #[cfg(not(windows))]
+        {
+            anyhow::bail!("System proxy WebSocket transport is unsupported on this platform");
+        }
+    }
+    Ok(tungstenite_socket(connect_ws(req).await?))
 }
 
 /// Evenements emis par une session de streaming vers le frontend.
@@ -407,24 +570,21 @@ pub trait StreamingProvider: Send + Sync {
 /// Draine les messages WebSocket jusqu'a un timeout ou fermeture.
 /// Utilise apres envoi du commit pour recuperer les derniers transcripts.
 /// Chaque message texte est passe au callback fourni.
-pub async fn drain_ws_messages<S, F>(read: &mut S, timeout: std::time::Duration, mut on_text: F)
-where
-    S: futures_util::StreamExt<
-            Item = Result<
-                tokio_tungstenite::tungstenite::Message,
-                tokio_tungstenite::tungstenite::Error,
-            >,
-        > + Unpin,
+pub async fn drain_ws_messages<F>(
+    read: &mut dyn StreamingSocketRead,
+    timeout: std::time::Duration,
+    mut on_text: F,
+) where
     F: FnMut(&str),
 {
-    use tokio_tungstenite::tungstenite::Message;
     let deadline = tokio::time::Instant::now() + timeout;
     while tokio::time::Instant::now() < deadline {
         let remaining = deadline - tokio::time::Instant::now();
         match tokio::time::timeout(remaining, read.next()).await {
-            Ok(Some(Ok(Message::Text(t)))) => on_text(&t),
-            Ok(Some(Ok(Message::Close(_)))) | Ok(None) | Err(_) => break,
-            _ => {}
+            Ok(Ok(Some(StreamingMessage::Text(text)))) => on_text(&text),
+            Ok(Ok(Some(StreamingMessage::Close))) | Ok(Ok(None)) | Err(_) => break,
+            Ok(Ok(Some(StreamingMessage::Binary(_)))) => {}
+            Ok(Err(_)) => break,
         }
     }
 }
