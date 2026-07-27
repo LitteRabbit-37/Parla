@@ -262,6 +262,7 @@ impl MultipartEncoder {
     pub fn content_type(&self) -> String {
         format!("multipart/form-data; boundary={}", self.boundary)
     }
+    #[cfg(test)]
     pub fn encode(&self) -> Vec<u8> {
         self.try_encode()
             .expect("multipart boundary occurs in encoded part data")
@@ -348,6 +349,7 @@ pub fn map_http_err(e: reqwest::Error) -> anyhow::Error {
 /// Map errors returned by the blocking WinHTTP task to the same retry classes
 /// used by the async reqwest transport. Join failures stay separate so task
 /// lifecycle errors are not misreported as network failures.
+#[cfg(any(test, windows))]
 fn map_winhttp_err(error: anyhow::Error) -> anyhow::Error {
     let detail = crate::services::download::sanitize_message(&error.to_string());
     let lower = detail.to_ascii_lowercase();

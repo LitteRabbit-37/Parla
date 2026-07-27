@@ -272,6 +272,7 @@ fn resolve_system(_url: &Url) -> Result<ProxyRoute> {
     anyhow::bail!("Windows system proxy is unsupported on this platform")
 }
 
+#[cfg(test)]
 fn parse_windows_proxy(url: &Url, value: Option<&str>) -> Result<ProxyRoute> {
     let value = value
         .map(str::trim)
