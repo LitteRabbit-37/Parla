@@ -641,6 +641,30 @@ mod tests {
     }
 
     #[test]
+    fn explicit_no_proxy_resolves_direct_for_all_supported_cloud_schemes() {
+        let route = Some(ProxyRoute::Explicit {
+            url: "http://proxy.example:8080".into(),
+            credentials: None,
+        });
+        let no_proxy = vec!["service.example".into()];
+
+        for target in [
+            "http://service.example/upload",
+            "https://service.example/api",
+            "ws://service.example/stream",
+            "wss://service.example/stream",
+        ] {
+            assert!(
+                matches!(
+                    select_route(route.clone(), &no_proxy, &Url::parse(target).unwrap()),
+                    Ok(ProxyRoute::Direct)
+                ),
+                "No-Proxy must bypass explicit proxy for {target}"
+            );
+        }
+    }
+
+    #[test]
     #[cfg(windows)]
     fn application_no_proxy_preserves_system_route() {
         assert_eq!(

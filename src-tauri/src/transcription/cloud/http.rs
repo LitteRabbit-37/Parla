@@ -392,6 +392,55 @@ pub async fn wav_part_from_path(wav_path: &Path) -> Result<Part> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::mpsc::{self, Receiver};
+    use std::thread::{self, JoinHandle};
+
+    fn local_server(responses: Vec<&'static str>) -> (String, Receiver<Vec<u8>>, JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let thread = thread::spawn(move || {
+            for response in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                let request = read_request(&mut stream);
+                sender.send(request).unwrap();
+                thread::sleep(Duration::from_millis(20));
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        (format!("http://{address}"), receiver, thread)
+    }
+
+    fn read_request(stream: &mut TcpStream) -> Vec<u8> {
+        let mut request = Vec::new();
+        let mut buffer = [0; 4096];
+        let header_end = loop {
+            let count = stream.read(&mut buffer).unwrap();
+            if count == 0 {
+                break request.len();
+            }
+            request.extend_from_slice(&buffer[..count]);
+            if let Some(end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                break end + 4;
+            }
+        };
+        let headers = String::from_utf8_lossy(&request[..header_end]);
+        let length = headers
+            .lines()
+            .find_map(|line| line.strip_prefix("Content-Length: "))
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        while request.len() < header_end + length {
+            let count = stream.read(&mut buffer).unwrap();
+            if count == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..count]);
+        }
+        request
+    }
 
     #[test]
     fn status_error_redacts_credentials_and_tokens() {
@@ -501,5 +550,144 @@ mod tests {
             assert_eq!(error, "http header contains unsafe characters");
             assert!(!error.contains(value));
         }
+    }
+
+    #[tokio::test]
+    async fn send_follows_redirect() {
+        let (endpoint, requests, server) = local_server(vec![
+            "HTTP/1.1 302 Found\r\nLocation: /final\r\nContent-Length: 0\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok",
+        ]);
+        let _guard = crate::services::proxy::test_runtime_guard(
+            Some(crate::services::proxy::ProxyRoute::Direct),
+            vec![],
+        );
+        let response = BatchHttpClient::new(&endpoint)
+            .unwrap()
+            .send(HttpRequest::new("GET", format!("{endpoint}/start")))
+            .await
+            .unwrap();
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"ok");
+        let _ = requests.recv().unwrap();
+        assert!(requests.recv().is_ok());
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn send_replays_body_on_temporary_redirect() {
+        let (endpoint, requests, server) = local_server(vec![
+            "HTTP/1.1 307 Temporary Redirect\r\nLocation: /retry\r\nContent-Length: 0\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok",
+        ]);
+        let _guard = crate::services::proxy::test_runtime_guard(
+            Some(crate::services::proxy::ProxyRoute::Direct),
+            vec![],
+        );
+        let response = BatchHttpClient::new(&endpoint)
+            .unwrap()
+            .send(HttpRequest::new("POST", format!("{endpoint}/upload")).body(b"audio".to_vec()))
+            .await
+            .unwrap();
+        assert_eq!(response.status, 200);
+        let first = requests.recv().unwrap();
+        let second = requests.recv().unwrap();
+        assert!(String::from_utf8_lossy(&first).ends_with("audio"));
+        assert!(String::from_utf8_lossy(&second).ends_with("audio"));
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn explicit_proxy_407_diagnostic_redacts_secret() {
+        let (proxy, requests, server) = local_server(vec![
+            "HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 30\r\n\r\n{\"accessToken\":\"proxy-secret\"}",
+        ]);
+        let _guard = crate::services::proxy::test_runtime_guard(
+            Some(crate::services::proxy::ProxyRoute::Explicit {
+                url: proxy,
+                credentials: None,
+            }),
+            vec![],
+        );
+        let request = HttpRequest::new("GET", "http://destination.invalid/transcribe")
+            .header("Authorization", "Bearer header-secret");
+        let response = BatchHttpClient::new(&request.url)
+            .unwrap()
+            .send(request.clone())
+            .await
+            .unwrap();
+        assert_eq!(response.status, 407);
+        let error = http_status_error(response.status, &response.body, &request).to_string();
+        assert!(error.contains("HTTP 407"));
+        assert!(!error.contains("proxy-secret"));
+        assert!(!error.contains("header-secret"));
+        assert!(String::from_utf8_lossy(&requests.recv().unwrap()).contains("destination.invalid"));
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn send_timeout_is_classified() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let (shutdown_sender, shutdown_receiver) = mpsc::channel();
+        let server = thread::spawn(move || loop {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let _ = read_request(&mut stream);
+                    shutdown_receiver.recv().unwrap();
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if shutdown_receiver.try_recv().is_ok() {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("local server accept: {error}"),
+            }
+        });
+        let _guard = crate::services::proxy::test_runtime_guard(
+            Some(crate::services::proxy::ProxyRoute::Direct),
+            vec![],
+        );
+        let result = BatchHttpClient::new(&endpoint)
+            .unwrap()
+            .send_with_timeout(HttpRequest::new("GET", endpoint), Duration::from_millis(1))
+            .await;
+        shutdown_sender.send(()).unwrap();
+        server.join().unwrap();
+        let error = result.unwrap_err();
+        assert!(error.to_string().starts_with("timeout:"));
+    }
+
+    #[tokio::test]
+    async fn explicit_no_proxy_bypasses_proxy() {
+        let (target, requests, target_server) =
+            local_server(vec!["HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"]);
+        let proxy_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let proxy = format!("http://{}", proxy_listener.local_addr().unwrap());
+        drop(proxy_listener);
+        let target_url = Url::parse(&target).unwrap();
+        let host_port = format!(
+            "{}:{}",
+            target_url.host_str().unwrap(),
+            target_url.port_or_known_default().unwrap()
+        );
+        let _guard = crate::services::proxy::test_runtime_guard(
+            Some(crate::services::proxy::ProxyRoute::Explicit {
+                url: proxy,
+                credentials: None,
+            }),
+            vec![host_port],
+        );
+        let response = BatchHttpClient::new(&target)
+            .unwrap()
+            .send(HttpRequest::new("GET", target.clone()))
+            .await
+            .unwrap();
+        assert_eq!(response.status, 200);
+        assert!(String::from_utf8_lossy(&requests.recv().unwrap()).contains("GET / HTTP/1.1"));
+        target_server.join().unwrap();
     }
 }

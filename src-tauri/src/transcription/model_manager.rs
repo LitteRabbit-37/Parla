@@ -352,38 +352,31 @@ impl ModelManager {
         }
         let total = resp.content_length().unwrap_or(model.size_bytes);
 
-        let mut file = tokio::fs::File::create(&tmp)
+        let file = tokio::fs::File::create(&tmp)
             .await
             .with_context(|| format!("create {}", tmp.display()))?;
-        let mut stream = resp.bytes_stream();
-        let mut downloaded: u64 = 0;
         let mut last_emit = std::time::Instant::now();
-
-        while let Some(chunk) = stream.next().await {
-            if cancel.load(std::sync::atomic::Ordering::SeqCst) {
-                // Cleanup du fichier partiel. Cancel flag is removed by
-                // the outer download() wrapper on return.
-                drop(file);
-                let _ = fs::remove_file(&tmp);
-                return Err(anyhow!("telechargement annule"));
-            }
-            let bytes = chunk.context("chunk recv")?;
-            file.write_all(&bytes).await?;
-            downloaded += bytes.len() as u64;
-
-            // Throttle les emits a ~20 Hz pour eviter de saturer le bridge IPC.
-            if last_emit.elapsed() >= std::time::Duration::from_millis(50) {
-                let _ = self.app.emit(
-                    "model:download:progress",
-                    DownloadProgress {
-                        id: id.to_string(),
-                        downloaded,
-                        total,
-                    },
-                );
-                last_emit = std::time::Instant::now();
-            }
-        }
+        let (mut file, downloaded) = write_stream_to_partial_file(
+            resp.bytes_stream(),
+            file,
+            &tmp,
+            &cancel,
+            std::time::Duration::from_secs(30),
+            |downloaded| {
+                if last_emit.elapsed() >= std::time::Duration::from_millis(50) {
+                    let _ = self.app.emit(
+                        "model:download:progress",
+                        DownloadProgress {
+                            id: id.to_string(),
+                            downloaded,
+                            total,
+                        },
+                    );
+                    last_emit = std::time::Instant::now();
+                }
+            },
+        )
+        .await?;
         file.flush().await?;
         drop(file);
 
@@ -533,6 +526,46 @@ enum SystemDownloadMessage {
     Result(Result<PathBuf>),
 }
 
+async fn write_stream_to_partial_file<S, B, E, F>(
+    mut stream: S,
+    mut file: tokio::fs::File,
+    partial_path: &Path,
+    cancel: &std::sync::atomic::AtomicBool,
+    chunk_timeout: std::time::Duration,
+    mut on_progress: F,
+) -> Result<(tokio::fs::File, u64)>
+where
+    S: futures_util::Stream<Item = std::result::Result<B, E>> + Unpin,
+    B: AsRef<[u8]>,
+    E: std::error::Error + Send + Sync + 'static,
+    F: FnMut(u64),
+{
+    let mut downloaded = 0;
+    loop {
+        let next_chunk = match tokio::time::timeout(chunk_timeout, stream.next()).await {
+            Ok(next_chunk) => next_chunk,
+            Err(_) => {
+                drop(file);
+                let _ = fs::remove_file(partial_path);
+                return Err(anyhow!(
+                    "model download body stalled while waiting for next chunk"
+                ));
+            }
+        };
+        let Some(chunk) = next_chunk else { break };
+        if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            drop(file);
+            let _ = fs::remove_file(partial_path);
+            return Err(anyhow!("telechargement annule"));
+        }
+        let bytes = chunk.context("chunk recv")?;
+        file.write_all(bytes.as_ref()).await?;
+        downloaded += bytes.as_ref().len() as u64;
+        on_progress(downloaded);
+    }
+    Ok((file, downloaded))
+}
+
 async fn system_download_worker(
     app: AppHandle,
     id: String,
@@ -605,4 +638,72 @@ async fn system_download_worker(
         },
     );
     Ok(target)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_stream_to_partial_file;
+    use futures_util::stream;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[tokio::test]
+    async fn cancellation_after_first_chunk_removes_partial_file() {
+        let path = std::env::temp_dir().join(format!(
+            "parla-model-manager-test-{}.bin.part",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let cancel = AtomicBool::new(false);
+        let result = write_stream_to_partial_file(
+            stream::iter([
+                Ok::<_, std::io::Error>(b"first".to_vec()),
+                Ok::<_, std::io::Error>(b"second".to_vec()),
+            ]),
+            file,
+            &path,
+            &cancel,
+            std::time::Duration::from_secs(30),
+            |downloaded| {
+                if downloaded == 5 {
+                    cancel.store(true, Ordering::SeqCst);
+                }
+            },
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(!path.exists());
+        assert!(!path.with_extension("bin").exists());
+    }
+
+    #[tokio::test]
+    async fn stalled_body_returns_within_chunk_timeout_and_removes_partial_file() {
+        use std::task::Poll;
+
+        let path = std::env::temp_dir().join(format!(
+            "parla-model-manager-stalled-test-{}.bin.part",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let file = tokio::fs::File::create(&path).await.unwrap();
+        let cancel = AtomicBool::new(false);
+        let result = write_stream_to_partial_file(
+            stream::poll_fn(
+                |_: &mut std::task::Context<'_>| -> Poll<Option<std::result::Result<Vec<u8>, std::io::Error>>> {
+                    Poll::Pending
+                },
+            ),
+            file,
+            &path,
+            &cancel,
+            std::time::Duration::from_millis(10),
+            |_| {},
+        )
+        .await;
+
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("body stalled"), "unexpected error: {error}");
+        assert!(!path.exists());
+    }
 }

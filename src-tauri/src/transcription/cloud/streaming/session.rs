@@ -175,10 +175,19 @@ mod routing_tests {
         messages: VecDeque<anyhow::Result<Option<StreamingMessage>>>,
     }
 
+    struct PendingRead;
+
     #[async_trait]
     impl StreamingSocketRead for MockRead {
         async fn next(&mut self) -> anyhow::Result<Option<StreamingMessage>> {
             self.messages.pop_front().unwrap_or_else(|| Ok(None))
+        }
+    }
+
+    #[async_trait]
+    impl StreamingSocketRead for PendingRead {
+        async fn next(&mut self) -> anyhow::Result<Option<StreamingMessage>> {
+            std::future::pending().await
         }
     }
 
@@ -280,6 +289,23 @@ mod routing_tests {
         assert_eq!(route, ProxyRoute::Direct);
     }
 
+    #[test]
+    fn system_route_contract_ignores_application_no_proxy_and_uses_no_fallback() {
+        let _guard = crate::services::proxy::test_runtime_guard(
+            Some(ProxyRoute::System),
+            vec!["service.example".into()],
+        );
+        let route = crate::services::proxy::route_for_url(
+            &url::Url::parse("wss://service.example/stream").unwrap(),
+        );
+        #[cfg(not(windows))]
+        assert!(route.is_err());
+        #[cfg(windows)]
+        assert!(matches!(route, Ok(ProxyRoute::System)));
+        assert_eq!(dispatch_connection(&ProxyRoute::System), "winhttp");
+        assert_ne!(dispatch_connection(&ProxyRoute::System), "tungstenite");
+    }
+
     #[tokio::test]
     async fn drain_uses_transport_neutral_read_contract() {
         let mut read = MockRead {
@@ -333,6 +359,108 @@ mod routing_tests {
         };
         assert!(error.contains("timeout: ws connect"));
         accept_task.abort();
+    }
+
+    #[tokio::test]
+    async fn public_stream_boundary_times_out_pending_read() {
+        let started = tokio::time::Instant::now();
+        let mut read = PendingRead;
+        drain_ws_messages(&mut read, Duration::from_millis(25), |_| {}).await;
+
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn public_connect_boundary_can_be_cancelled_before_handshake() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let _guard = crate::services::proxy::test_runtime_guard(Some(ProxyRoute::Direct), vec![]);
+        let request = format!("ws://{address}/stream")
+            .into_client_request()
+            .unwrap();
+        let connect_task = tokio::spawn(connect_streaming_socket(request));
+        let _accepted = tokio::time::timeout(Duration::from_secs(1), listener.accept())
+            .await
+            .expect("public connect did not reach controlled listener")
+            .unwrap();
+
+        connect_task.abort();
+        match connect_task.await {
+            Err(error) => assert!(error.is_cancelled()),
+            Ok(_) => panic!("cancelled public connect unexpectedly completed"),
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_http_proxy_connect_routes_and_sanitizes_407_diagnostic() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_address = listener.local_addr().unwrap();
+        let credentials = ProxyCredentials {
+            username: "proxy-user".into(),
+            password: "proxy-secret".into(),
+        };
+        let proxy_token = {
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD
+                .encode(format!("{}:{}", credentials.username, credentials.password))
+        };
+        let _guard = crate::services::proxy::test_runtime_guard(
+            Some(ProxyRoute::Explicit {
+                url: format!("http://{proxy_address}"),
+                credentials: Some(credentials),
+            }),
+            vec![],
+        );
+        let proxy_task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0u8; 512];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let count = stream.read(&mut buffer).await.unwrap();
+                assert_ne!(count, 0, "proxy client closed before CONNECT headers");
+                request.extend_from_slice(&buffer[..count]);
+            }
+            let request = String::from_utf8(request).unwrap();
+            assert!(request.starts_with("CONNECT streaming-target.invalid:443 HTTP/1.1\r\n"));
+            assert!(request.contains("Proxy-Authorization: Basic "));
+            stream
+                .write_all(
+                    b"HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            request
+        });
+
+        let request = "wss://streaming-target.invalid/stream"
+            .into_client_request()
+            .unwrap();
+        let diagnostic = match connect_streaming_socket(request).await {
+            Ok(_) => panic!("407 proxy unexpectedly completed WebSocket handshake"),
+            Err(error) => error.to_string(),
+        };
+        let proxy_request = proxy_task.await.unwrap();
+
+        assert!(proxy_request.starts_with("CONNECT streaming-target.invalid:443"));
+        assert!(diagnostic.contains("407 Proxy Authentication Required"));
+        assert!(!diagnostic.contains(&proxy_token));
+        assert!(!diagnostic.contains("proxy-user"));
+        assert!(!diagnostic.contains("proxy-secret"));
+    }
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn public_system_connect_reports_unsupported_without_fallback() {
+        let _guard = crate::services::proxy::test_runtime_guard(Some(ProxyRoute::System), vec![]);
+        let request = "ws://service.example/stream".into_client_request().unwrap();
+        let error = connect_streaming_socket(request)
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("System proxy WebSocket transport is unsupported"));
+        assert_eq!(dispatch_connection(&ProxyRoute::System), "winhttp");
+        assert_ne!(dispatch_connection(&ProxyRoute::System), "tungstenite");
     }
 }
 
@@ -449,7 +577,8 @@ async fn connect_ws_inner(req: WsRequest) -> anyhow::Result<WsStream> {
                     }
                     let first = std::str::from_utf8(&response)?.lines().next().unwrap_or("");
                     if !first.contains(" 200 ") {
-                        return Err(anyhow!("proxy CONNECT failed"));
+                        let diagnostic = crate::services::download::sanitize_message(first);
+                        return Err(anyhow!("proxy CONNECT failed: {diagnostic}"));
                     }
                     Box::new(stream)
                 }
