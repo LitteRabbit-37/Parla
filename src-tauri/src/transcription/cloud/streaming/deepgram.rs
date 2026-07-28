@@ -19,8 +19,8 @@ use serde_json::Value;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use super::session::{
-    connect_streaming_socket, i16_to_le_bytes, StreamingChannels, StreamingConfig, StreamingEvent,
-    StreamingMessage, StreamingProvider, StreamingSocketRead,
+    connect_streaming_socket, drain_ws_messages, i16_to_le_bytes, StreamingChannels,
+    StreamingConfig, StreamingEvent, StreamingMessage, StreamingProvider,
 };
 
 pub struct DeepgramStreaming;
@@ -83,7 +83,10 @@ impl StreamingProvider for DeepgramStreaming {
                     }
                     let _ = write.send_text("{\"type\":\"Finalize\"}".into()).await;
                     // On attend les derniers transcripts quelques secondes.
-                    let final_text = drain_remaining(read.as_mut(), &mut accumulated_final, &on_event).await;
+                    drain_ws_messages(read.as_mut(), Duration::from_secs(5), |text| {
+                        handle_text(text, &mut accumulated_final, &on_event);
+                    }).await;
+                    let final_text = accumulated_final.trim().to_string();
                     let _ = write.send_text("{\"type\":\"CloseStream\"}".into()).await;
                     let _ = write.close().await;
                     return Ok(final_text);
@@ -102,7 +105,10 @@ impl StreamingProvider for DeepgramStreaming {
                         None => {
                             // Plus de chunks : on se comporte comme si finalize.
                             let _ = write.send_text("{\"type\":\"Finalize\"}".into()).await;
-                            let final_text = drain_remaining(read.as_mut(), &mut accumulated_final, &on_event).await;
+                            drain_ws_messages(read.as_mut(), Duration::from_secs(5), |text| {
+                                handle_text(text, &mut accumulated_final, &on_event);
+                            }).await;
+                            let final_text = accumulated_final.trim().to_string();
                             let _ = write.send_text("{\"type\":\"CloseStream\"}".into()).await;
                             let _ = write.close().await;
                             return Ok(final_text);
@@ -123,26 +129,6 @@ impl StreamingProvider for DeepgramStreaming {
             }
         }
     }
-}
-
-async fn drain_remaining(
-    read: &mut dyn StreamingSocketRead,
-    accumulated: &mut String,
-    on_event: &(dyn Fn(StreamingEvent) + Send + Sync),
-) -> String {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while tokio::time::Instant::now() < deadline {
-        let remaining = deadline - tokio::time::Instant::now();
-        match tokio::time::timeout(remaining, read.next()).await {
-            Ok(Ok(Some(StreamingMessage::Text(text)))) => handle_text(&text, accumulated, on_event),
-            Ok(Ok(Some(StreamingMessage::Binary(_))))
-            | Ok(Ok(Some(StreamingMessage::Close)))
-            | Ok(Ok(None))
-            | Ok(Err(_))
-            | Err(_) => break,
-        }
-    }
-    accumulated.trim().to_string()
 }
 
 fn handle_text(

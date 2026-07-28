@@ -137,10 +137,16 @@ fn streaming_connection_plan(
     }
 }
 
-fn dispatch_connection(route: &crate::services::proxy::ProxyRoute) -> &'static str {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamingBackend {
+    WinHttp,
+    Tungstenite,
+}
+
+fn backend_for_route(route: &crate::services::proxy::ProxyRoute) -> StreamingBackend {
     match route {
-        crate::services::proxy::ProxyRoute::System => "winhttp",
-        _ => "tungstenite",
+        crate::services::proxy::ProxyRoute::System => StreamingBackend::WinHttp,
+        _ => StreamingBackend::Tungstenite,
     }
 }
 
@@ -228,8 +234,25 @@ mod routing_tests {
 
     #[test]
     fn system_route_selects_native_backend_without_fallback() {
-        assert_eq!(dispatch_connection(&ProxyRoute::System), "winhttp");
-        assert_ne!(dispatch_connection(&ProxyRoute::System), "tungstenite");
+        assert_eq!(
+            backend_for_route(&ProxyRoute::System),
+            StreamingBackend::WinHttp
+        );
+    }
+
+    #[test]
+    fn direct_and_explicit_routes_select_tungstenite_backend() {
+        assert_eq!(
+            backend_for_route(&ProxyRoute::Direct),
+            StreamingBackend::Tungstenite
+        );
+        assert_eq!(
+            backend_for_route(&ProxyRoute::Explicit {
+                url: "http://proxy.example:8080".into(),
+                credentials: None,
+            }),
+            StreamingBackend::Tungstenite
+        );
     }
 
     #[test]
@@ -237,7 +260,7 @@ mod routing_tests {
         let route = ProxyRoute::System;
         let diagnostic =
             connect_timeout_diagnostic("wss://service.example/stream", WS_CONNECT_TIMEOUT);
-        assert_eq!(dispatch_connection(&route), "winhttp");
+        assert_eq!(backend_for_route(&route), StreamingBackend::WinHttp);
         assert!(!diagnostic.contains("tungstenite"));
         assert!(diagnostic.contains("timeout: ws connect"));
         assert!(diagnostic.contains("(>10s)"));
@@ -302,8 +325,10 @@ mod routing_tests {
         assert!(route.is_err());
         #[cfg(windows)]
         assert!(matches!(route, Ok(ProxyRoute::System)));
-        assert_eq!(dispatch_connection(&ProxyRoute::System), "winhttp");
-        assert_ne!(dispatch_connection(&ProxyRoute::System), "tungstenite");
+        assert_eq!(
+            backend_for_route(&ProxyRoute::System),
+            StreamingBackend::WinHttp
+        );
     }
 
     #[tokio::test]
@@ -459,8 +484,10 @@ mod routing_tests {
             .to_string();
 
         assert!(error.contains("System proxy WebSocket transport is unsupported"));
-        assert_eq!(dispatch_connection(&ProxyRoute::System), "winhttp");
-        assert_ne!(dispatch_connection(&ProxyRoute::System), "tungstenite");
+        assert_eq!(
+            backend_for_route(&ProxyRoute::System),
+            StreamingBackend::WinHttp
+        );
     }
 }
 
@@ -600,15 +627,18 @@ async fn connect_ws_inner(req: WsRequest) -> anyhow::Result<WsStream> {
 pub async fn connect_streaming_socket(req: WsRequest) -> anyhow::Result<StreamingSocket> {
     let target = url::Url::parse(&req.uri().to_string()).context("WebSocket URL")?;
     let route = crate::services::proxy::route_for_url(&target)?;
-    if dispatch_connection(&route) == "winhttp" {
-        #[cfg(windows)]
-        {
-            return crate::services::winhttp::connect_websocket(&req, WS_CONNECT_TIMEOUT).await;
+    match backend_for_route(&route) {
+        StreamingBackend::WinHttp => {
+            #[cfg(windows)]
+            {
+                return crate::services::winhttp::connect_websocket(&req, WS_CONNECT_TIMEOUT).await;
+            }
+            #[cfg(not(windows))]
+            {
+                anyhow::bail!("System proxy WebSocket transport is unsupported on this platform");
+            }
         }
-        #[cfg(not(windows))]
-        {
-            anyhow::bail!("System proxy WebSocket transport is unsupported on this platform");
-        }
+        StreamingBackend::Tungstenite => {}
     }
     Ok(tungstenite_socket(connect_ws(req).await?))
 }

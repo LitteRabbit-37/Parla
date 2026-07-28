@@ -24,8 +24,8 @@ use serde_json::{json, Value};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use super::session::{
-    connect_streaming_socket, i16_to_le_bytes, StreamingChannels, StreamingConfig, StreamingEvent,
-    StreamingMessage, StreamingProvider, StreamingSocketRead,
+    connect_streaming_socket, drain_ws_messages, i16_to_le_bytes, StreamingChannels,
+    StreamingConfig, StreamingEvent, StreamingMessage, StreamingProvider,
 };
 
 pub struct XaiStreaming;
@@ -110,7 +110,9 @@ impl StreamingProvider for XaiStreaming {
                     let _ = write
                         .send_text(json!({ "type": "audio.done" }).to_string())
                         .await;
-                    drain(&mut *read, &mut state, &on_event).await;
+                    drain_ws_messages(read.as_mut(), std::time::Duration::from_secs(5), |text| {
+                        handle_text(text, &mut state, &on_event)
+                    }).await;
                     let _ = write.close().await;
                     return Ok(state.final_text.trim().to_string());
                 }
@@ -137,22 +139,6 @@ impl StreamingProvider for XaiStreaming {
                     }
                 }
             }
-        }
-    }
-}
-
-async fn drain(
-    read: &mut (dyn StreamingSocketRead + Send),
-    state: &mut XaiState,
-    on_event: &(dyn Fn(StreamingEvent) + Send + Sync),
-) {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    while tokio::time::Instant::now() < deadline {
-        let remaining = deadline - tokio::time::Instant::now();
-        match tokio::time::timeout(remaining, read.next()).await {
-            Ok(Ok(Some(StreamingMessage::Text(t)))) => handle_text(&t, state, on_event),
-            Ok(Ok(Some(StreamingMessage::Close))) | Ok(Ok(None)) | Err(_) => break,
-            _ => {}
         }
     }
 }

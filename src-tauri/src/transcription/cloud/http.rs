@@ -1,7 +1,5 @@
 // Helpers HTTP partages par les clients batch.
 //
-// batch_client() : client reqwest avec timeouts explicites pour eviter les
-// hangs indefinis en cas de panne reseau ou d'API bloquee.
 // map_http_err()  : mapping anyhow qui discrimine timeout / connect error
 // (pattern repris de enhancement/providers/openai_compat.rs).
 
@@ -9,7 +7,6 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use reqwest::multipart::Part;
 use url::Url;
 
 /// Timeout total pour une requete batch (upload + traitement cote provider).
@@ -92,6 +89,9 @@ impl BatchHttpClient {
         request: HttpRequest,
         timeout: Duration,
     ) -> Result<HttpResponse> {
+        for (name, value) in &request.headers {
+            validate_header(name, value)?;
+        }
         let url = Url::parse(&request.url).map_err(|e| {
             let detail = crate::services::download::sanitize_message(&e.to_string());
             anyhow!("http endpoint: {detail}")
@@ -105,7 +105,7 @@ impl BatchHttpClient {
                     // drops JoinHandle, while WinHTTP keeps running in the blocking
                     // thread. WinHTTP phase timeouts bound each operation, not whole
                     // request lifetime, so a global deadline would leak detached work.
-                    return Ok(tokio::task::spawn_blocking(move || {
+                    Ok(tokio::task::spawn_blocking(move || {
                         let response = crate::services::winhttp::request(
                             &request.method,
                             &request.url,
@@ -121,12 +121,12 @@ impl BatchHttpClient {
                     })
                     .await
                     .map_err(|e| anyhow!("WinHTTP task: {e}"))
-                    .and_then(|result| result.map_err(map_winhttp_err))?);
+                    .and_then(|result| result.map_err(map_winhttp_err))?)
                 }
                 #[cfg(not(windows))]
-                return Err(anyhow!(
+                Err(anyhow!(
                     "Windows system proxy is unsupported on this platform"
-                ));
+                ))
             }
             crate::services::proxy::ProxyRoute::Direct
             | crate::services::proxy::ProxyRoute::Explicit { .. } => {
@@ -321,17 +321,6 @@ fn validate_multipart_parameter(kind: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-/// Client reqwest pre-configure pour les providers batch cloud.
-/// A utiliser partout a la place de `reqwest::Client::new()`.
-pub fn batch_client(endpoint: &str) -> Result<reqwest::Client> {
-    let url = Url::parse(endpoint).map_err(|e| anyhow!("http endpoint: {e}"))?;
-    crate::services::proxy::apply_for_url(reqwest::Client::builder(), &url)?
-        .timeout(BATCH_TIMEOUT)
-        .connect_timeout(CONNECT_TIMEOUT)
-        .build()
-        .map_err(|e| anyhow!("http client: {e}"))
-}
-
 /// Mappe une erreur reqwest en anyhow avec un prefixe discriminant.
 /// Le pipeline peut ensuite detecter "timeout" / "network_error" via le
 /// texte de l'erreur pour decider retry/backoff.
@@ -377,20 +366,6 @@ pub async fn read_wav_with_filename(wav_path: &Path) -> Result<(Vec<u8>, String)
     Ok((bytes, name))
 }
 
-/// Construit un Part multipart pour un WAV (mime audio/wav).
-pub fn wav_part(bytes: Vec<u8>, filename: String) -> Result<Part> {
-    Part::bytes(bytes)
-        .file_name(filename)
-        .mime_str("audio/wav")
-        .map_err(Into::into)
-}
-
-/// Lit le WAV et retourne directement un Part pret pour multipart.
-pub async fn wav_part_from_path(wav_path: &Path) -> Result<Part> {
-    let (bytes, name) = read_wav_with_filename(wav_path).await?;
-    wav_part(bytes, name)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -419,7 +394,19 @@ mod tests {
         let mut request = Vec::new();
         let mut buffer = [0; 4096];
         let header_end = loop {
-            let count = stream.read(&mut buffer).unwrap();
+            let count = match stream.read(&mut buffer) {
+                Ok(count) => count,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    thread::sleep(Duration::from_millis(1));
+                    continue;
+                }
+                Err(error) => panic!("local server read: {error}"),
+            };
             if count == 0 {
                 break request.len();
             }
@@ -435,7 +422,19 @@ mod tests {
             .and_then(|value| value.trim().parse::<usize>().ok())
             .unwrap_or(0);
         while request.len() < header_end + length {
-            let count = stream.read(&mut buffer).unwrap();
+            let count = match stream.read(&mut buffer) {
+                Ok(count) => count,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    thread::sleep(Duration::from_millis(1));
+                    continue;
+                }
+                Err(error) => panic!("local server read: {error}"),
+            };
             if count == 0 {
                 break;
             }
@@ -577,6 +576,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn send_rejects_unsafe_headers_before_transport() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let (sender, receiver) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_millis(250);
+            loop {
+                match listener.accept() {
+                    Ok(_) => {
+                        sender.send(true).unwrap();
+                        return;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if std::time::Instant::now() >= deadline {
+                            sender.send(false).unwrap();
+                            return;
+                        }
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("local server accept: {error}"),
+                }
+            }
+        });
+        let _guard = crate::services::proxy::test_runtime_guard(
+            Some(crate::services::proxy::ProxyRoute::Direct),
+            vec![],
+        );
+        let result = BatchHttpClient::new(&endpoint)
+            .unwrap()
+            .send(HttpRequest::new("GET", endpoint).header("X-Test", "unsafe\r\nvalue"))
+            .await;
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "http header contains unsafe characters"
+        );
+        assert!(!receiver.recv().unwrap());
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
     async fn send_replays_body_on_temporary_redirect() {
         let (endpoint, requests, server) = local_server(vec![
             "HTTP/1.1 307 Temporary Redirect\r\nLocation: /retry\r\nContent-Length: 0\r\n\r\n",
@@ -630,7 +670,6 @@ mod tests {
     #[tokio::test]
     async fn send_timeout_is_classified() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        listener.set_nonblocking(true).unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
         let (shutdown_sender, shutdown_receiver) = mpsc::channel();
         let server = thread::spawn(move || loop {
@@ -639,12 +678,6 @@ mod tests {
                     let _ = read_request(&mut stream);
                     shutdown_receiver.recv().unwrap();
                     break;
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    if shutdown_receiver.try_recv().is_ok() {
-                        break;
-                    }
-                    thread::sleep(Duration::from_millis(1));
                 }
                 Err(error) => panic!("local server accept: {error}"),
             }
@@ -691,5 +724,46 @@ mod tests {
         assert_eq!(response.status, 200);
         assert!(String::from_utf8_lossy(&requests.recv().unwrap()).contains("GET / HTTP/1.1"));
         target_server.join().unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn system_route_contract_stays_native_for_batch_transport() {
+        let _guard = crate::services::proxy::test_runtime_guard(
+            Some(crate::services::proxy::ProxyRoute::System),
+            vec!["service.example".into()],
+        );
+        let route = crate::services::proxy::route_for_url(
+            &Url::parse("https://service.example/transcribe").unwrap(),
+        )
+        .unwrap();
+
+        // WinHTTP owns System routing, including proxy bypass policy. The
+        // batch seam must not turn this into reqwest when application-level
+        // no-proxy rules contain the destination.
+        assert!(matches!(route, crate::services::proxy::ProxyRoute::System));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn system_batch_boundary_uses_winhttp_without_reqwest_fallback() {
+        let (endpoint, requests, server) =
+            local_server(vec!["HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"]);
+        let _guard = crate::services::proxy::test_runtime_guard(
+            Some(crate::services::proxy::ProxyRoute::System),
+            vec![],
+        );
+        let response = BatchHttpClient::new(&endpoint)
+            .unwrap()
+            .send(HttpRequest::new("GET", endpoint.clone()))
+            .await
+            .unwrap();
+
+        // System routing reaches the public batch seam without falling back to
+        // reqwest. The response contract stays transport-neutral.
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"ok");
+        assert!(String::from_utf8_lossy(&requests.recv().unwrap()).contains("GET / HTTP/1.1"));
+        server.join().unwrap();
     }
 }

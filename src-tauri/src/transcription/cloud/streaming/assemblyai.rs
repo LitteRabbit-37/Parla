@@ -25,8 +25,8 @@ use serde_json::Value;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use super::session::{
-    connect_streaming_socket, i16_to_le_bytes, StreamingChannels, StreamingConfig, StreamingEvent,
-    StreamingMessage, StreamingProvider, StreamingSocketRead, StreamingSocketWrite,
+    connect_streaming_socket, drain_ws_messages, i16_to_le_bytes, StreamingChannels,
+    StreamingConfig, StreamingEvent, StreamingMessage, StreamingProvider, StreamingSocketWrite,
 };
 
 pub struct AssemblyAiStreaming;
@@ -111,7 +111,7 @@ impl StreamingProvider for AssemblyAiStreaming {
                         let _ = write.send_binary(leftover).await;
                     }
                     let _ = write.send_text(r#"{"type":"Terminate"}"#.to_string()).await;
-                    drain_messages(read.as_mut(), std::time::Duration::from_secs(5), |t| {
+                    drain_ws_messages(read.as_mut(), std::time::Duration::from_secs(5), |t| {
                         handle_text(t, &mut state, &on_event);
                     })
                     .await;
@@ -156,24 +156,6 @@ async fn flush_buffered_chunks(
             .map_err(|e| anyhow!("ws send: {e}"))?;
     }
     Ok(())
-}
-
-async fn drain_messages<F>(
-    read: &mut dyn StreamingSocketRead,
-    timeout: std::time::Duration,
-    mut on_text: F,
-) where
-    F: FnMut(&str),
-{
-    let deadline = tokio::time::Instant::now() + timeout;
-    while tokio::time::Instant::now() < deadline {
-        let remaining = deadline - tokio::time::Instant::now();
-        match tokio::time::timeout(remaining, read.next()).await {
-            Ok(Ok(Some(StreamingMessage::Text(text)))) => on_text(&text),
-            Ok(Ok(Some(StreamingMessage::Close))) | Ok(Ok(None)) | Ok(Err(_)) | Err(_) => break,
-            Ok(Ok(Some(_))) => {}
-        }
-    }
 }
 
 fn build_streaming_url(config: &StreamingConfig) -> String {

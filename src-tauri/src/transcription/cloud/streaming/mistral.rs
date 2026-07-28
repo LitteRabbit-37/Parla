@@ -19,8 +19,8 @@ use serde_json::{json, Value};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use super::session::{
-    connect_streaming_socket, i16_to_base64, StreamingChannels, StreamingConfig, StreamingEvent,
-    StreamingMessage, StreamingProvider, StreamingSocketRead,
+    connect_streaming_socket, drain_ws_messages, i16_to_base64, StreamingChannels, StreamingConfig,
+    StreamingEvent, StreamingMessage, StreamingProvider,
 };
 
 pub struct MistralStreaming;
@@ -107,7 +107,15 @@ impl StreamingProvider for MistralStreaming {
                         let _ = write.send_text(msg.to_string()).await;
                     }
                     let _ = write.send_text(json!({ "type": "input_audio.end" }).to_string()).await;
-                    let final_text = drain(read.as_mut(), &mut accumulated, &mut committed_text, &on_event).await;
+                    drain_ws_messages(read.as_mut(), std::time::Duration::from_secs(5), |text| {
+                        handle_text(text, &mut accumulated, &mut committed_text, &on_event)
+                    }).await;
+                    let final_text = if committed_text.is_empty() && !accumulated.is_empty() {
+                        committed_text.push_str(&accumulated);
+                        committed_text.trim().to_string()
+                    } else {
+                        committed_text.trim().to_string()
+                    };
                     let _ = write.close().await;
                     return Ok(final_text);
                 }
@@ -134,29 +142,6 @@ impl StreamingProvider for MistralStreaming {
             }
         }
     }
-}
-
-async fn drain(
-    read: &mut dyn StreamingSocketRead,
-    accumulated: &mut String,
-    committed: &mut String,
-    on_event: &(dyn Fn(StreamingEvent) + Send + Sync),
-) -> String {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    while tokio::time::Instant::now() < deadline {
-        let remaining = deadline - tokio::time::Instant::now();
-        match tokio::time::timeout(remaining, read.next()).await {
-            Ok(Ok(Some(StreamingMessage::Text(t)))) => {
-                handle_text(&t, accumulated, committed, on_event)
-            }
-            Ok(Ok(Some(StreamingMessage::Close))) | Ok(Ok(None)) | Ok(Err(_)) | Err(_) => break,
-            Ok(Ok(Some(_))) => {}
-        }
-    }
-    if committed.is_empty() && !accumulated.is_empty() {
-        committed.push_str(accumulated);
-    }
-    committed.trim().to_string()
 }
 
 fn handle_text(
