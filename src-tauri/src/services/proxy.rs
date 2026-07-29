@@ -79,7 +79,9 @@ pub fn no_proxy_matches(host: &str, port: Option<u16>, entries: &[String]) -> bo
 #[derive(Debug, Clone, Default)]
 struct RuntimeProxy {
     route: Option<ProxyRoute>,
-    no_proxy: Vec<String>,
+    no_proxy: Vec<CompiledNoProxyEntry>,
+    direct_client: Option<reqwest::Client>,
+    explicit_client: Option<reqwest::Client>,
 }
 
 static RUNTIME: OnceLock<RwLock<RuntimeProxy>> = OnceLock::new();
@@ -112,7 +114,7 @@ pub(crate) fn test_runtime_guard(
     let mut state = runtime().write();
     let previous = state.clone();
     state.route = route;
-    state.no_proxy = no_proxy;
+    state.no_proxy = compile_no_proxy_entries(&no_proxy).expect("test No-Proxy entries");
     TestRuntimeGuard {
         previous,
         _lock: lock,
@@ -122,11 +124,12 @@ pub(crate) fn test_runtime_guard(
 /// Load persisted settings and credentials into backend-only runtime state.
 /// Credentials never leave this module or enter a frontend-serializable type.
 pub fn configure(app: &AppHandle) -> Result<()> {
-    let settings = app
-        .store(STORE_FILE)
-        .ok()
-        .and_then(|s| s.get(SETTINGS_KEY))
-        .and_then(|v| serde_json::from_value::<StoredSettings>(v).ok())
+    let store = app.store(STORE_FILE).context("proxy settings store")?;
+    let settings = store
+        .get(SETTINGS_KEY)
+        .map(serde_json::from_value::<StoredSettings>)
+        .transpose()
+        .context("parse persisted proxy settings")?
         .unwrap_or_default();
     let credentials = if settings.enabled
         && settings
@@ -134,22 +137,23 @@ pub fn configure(app: &AppHandle) -> Result<()> {
             .as_deref()
             .is_some_and(|u| !u.trim().is_empty())
     {
-        settings
-            .url
-            .as_deref()
-            .and_then(|url| proxy_identity(url).ok())
-            .and_then(|identity| get_credentials_for(&identity).ok().flatten())
+        let url = settings.url.as_deref().unwrap();
+        let identity = proxy_identity(url).map_err(|e| anyhow::anyhow!(e))?;
+        get_credentials_for(&identity)?
     } else {
-        let _ = delete_credentials();
         None
     };
+    let compiled_no_proxy = compile_no_proxy_entries(&settings.no_proxy_entries)
+        .map_err(|error| anyhow::anyhow!("invalid No-Proxy configuration: {error}"))?;
     let mut state = runtime().write();
     state.route = Some(route(
         settings.enabled,
         settings.url.as_deref(),
         credentials,
     ));
-    state.no_proxy = settings.no_proxy_entries;
+    state.no_proxy = compiled_no_proxy;
+    state.direct_client = None;
+    state.explicit_client = None;
     Ok(())
 }
 
@@ -167,6 +171,52 @@ struct StoredSettings {
 pub fn apply_for_url(builder: reqwest::ClientBuilder, url: &Url) -> Result<reqwest::ClientBuilder> {
     let route = route_for_url(url)?;
     apply_route(builder, route)
+}
+
+/// Return cached client for Direct or Explicit route. System must never use reqwest.
+pub fn client_for_url(url: &Url) -> Result<reqwest::Client> {
+    let selected = route_for_url(url)?;
+    let mut state = runtime().write();
+    match selected {
+        ProxyRoute::System => anyhow::bail!("system proxy requires WinHTTP"),
+        ProxyRoute::Direct => {
+            if state.direct_client.is_none() {
+                state.direct_client = Some(build_client(ProxyRoute::Direct, &state.no_proxy)?);
+            }
+            Ok(state.direct_client.as_ref().unwrap().clone())
+        }
+        ProxyRoute::Explicit { .. } => {
+            if state.explicit_client.is_none() {
+                state.explicit_client = Some(build_client(selected, &state.no_proxy)?);
+            }
+            Ok(state.explicit_client.as_ref().unwrap().clone())
+        }
+    }
+}
+
+fn build_client(route: ProxyRoute, no_proxy: &[CompiledNoProxyEntry]) -> Result<reqwest::Client> {
+    let mut builder = reqwest::Client::builder();
+    match route {
+        ProxyRoute::Direct => builder = builder.no_proxy(),
+        ProxyRoute::Explicit { url, credentials } => {
+            let proxy_url = url.clone();
+            let matcher = no_proxy.to_vec();
+            let mut proxy = reqwest::Proxy::custom(move |destination| {
+                (!no_proxy_matches_compiled(
+                    destination.host_str().unwrap_or_default(),
+                    destination.port_or_known_default(),
+                    &matcher,
+                ))
+                .then(|| proxy_url.clone())
+            });
+            if let Some(c) = credentials {
+                proxy = proxy.basic_auth(&c.username, &c.password);
+            }
+            builder = builder.proxy(proxy);
+        }
+        ProxyRoute::System => anyhow::bail!("system proxy requires WinHTTP"),
+    }
+    Ok(builder.build()?)
 }
 
 /// Applies routing and returns metadata safe for diagnostics. Never includes
@@ -225,10 +275,6 @@ fn apply_route(
             if let Some(c) = credentials {
                 proxy = proxy.basic_auth(&c.username, &c.password);
             }
-            let no_proxy = runtime().read().no_proxy.clone();
-            if !no_proxy.is_empty() {
-                proxy = proxy.no_proxy(reqwest::NoProxy::from_string(&no_proxy.join(",")));
-            }
             builder.proxy(proxy)
         }
     };
@@ -240,10 +286,14 @@ pub fn route_for_url(url: &Url) -> Result<ProxyRoute> {
     select_route(state.route, &state.no_proxy, url)
 }
 
-fn select_route(route: Option<ProxyRoute>, no_proxy: &[String], url: &Url) -> Result<ProxyRoute> {
+fn select_route(
+    route: Option<ProxyRoute>,
+    no_proxy: &[CompiledNoProxyEntry],
+    url: &Url,
+) -> Result<ProxyRoute> {
     match route {
         Some(ProxyRoute::Explicit { .. })
-            if no_proxy_matches(
+            if no_proxy_matches_compiled(
                 url.host_str().unwrap_or_default(),
                 url.port_or_known_default(),
                 no_proxy,
@@ -473,6 +523,66 @@ fn parse_no_proxy_entry(raw: &str) -> Result<String, &'static str> {
     })
 }
 
+#[derive(Debug, Clone)]
+struct CompiledNoProxyEntry {
+    pattern: String,
+    port: Option<u16>,
+    wildcard_subdomains: bool,
+}
+
+fn compile_no_proxy_entries(entries: &[String]) -> Result<Vec<CompiledNoProxyEntry>, String> {
+    entries
+        .iter()
+        .map(|raw| {
+            let pattern =
+                parse_no_proxy_entry(raw).map_err(|reason| format!("{raw:?}: {reason}"))?;
+            let (host, port) = if pattern.starts_with('[') {
+                let end = pattern.find(']').unwrap();
+                let port = pattern[end + 1..]
+                    .strip_prefix(':')
+                    .and_then(|p| p.parse().ok());
+                (pattern[1..end].to_owned(), port)
+            } else if pattern.parse::<std::net::IpAddr>().is_ok()
+                || pattern.parse::<ipnet::IpNet>().is_ok()
+            {
+                (pattern.clone(), None)
+            } else if let Some((host, port)) = pattern.rsplit_once(':') {
+                (host.to_owned(), port.parse().ok())
+            } else {
+                (pattern.clone(), None)
+            };
+            Ok(CompiledNoProxyEntry {
+                wildcard_subdomains: raw.trim_start().starts_with("*.") || host.starts_with('.'),
+                pattern: host,
+                port,
+            })
+        })
+        .collect()
+}
+
+fn no_proxy_matches_compiled(
+    host: &str,
+    port: Option<u16>,
+    entries: &[CompiledNoProxyEntry],
+) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    let ip = host.parse::<std::net::IpAddr>().ok();
+    entries.iter().any(|entry| {
+        if entry.pattern == "*" || entry.port.is_some_and(|p| Some(p) != port) {
+            return entry.pattern == "*";
+        }
+        if let (Some(ip), Ok(net)) = (ip, entry.pattern.parse::<ipnet::IpNet>()) {
+            return net.contains(&ip);
+        }
+        let pattern = entry.pattern.trim_start_matches('.');
+        if entry.wildcard_subdomains {
+            host != pattern && host.ends_with(&format!(".{pattern}"))
+        } else {
+            host == pattern || host.ends_with(&format!(".{pattern}"))
+        }
+    })
+}
+
 pub fn route(
     enabled: bool,
     url: Option<&str>,
@@ -513,13 +623,33 @@ struct StoredCredentials {
     identity: Option<String>,
 }
 
+pub(crate) type CredentialSnapshot = Option<String>;
+
+pub(crate) fn snapshot_credentials() -> Result<CredentialSnapshot> {
+    match entry()?.get_password() {
+        Ok(value) => Ok(Some(value)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(anyhow::anyhow!("keyring get: {e}")),
+    }
+}
+
+pub(crate) fn restore_credentials(snapshot: &CredentialSnapshot) -> Result<()> {
+    match snapshot {
+        Some(value) => entry()?
+            .set_password(value)
+            .map_err(|e| anyhow::anyhow!("keyring set: {e}")),
+        None => delete_credentials(),
+    }
+}
+
 fn get_credentials_for(identity: &str) -> Result<Option<ProxyCredentials>> {
     match entry()?.get_password() {
-        Ok(value) => {
-            let stored: StoredCredentials =
-                serde_json::from_str(&value).context("invalid proxy credentials")?;
-            Ok((stored.identity.as_deref() == Some(identity)).then_some(stored.credentials))
-        }
+        Ok(value) => match serde_json::from_str::<StoredCredentials>(&value) {
+            Ok(stored) => {
+                Ok((stored.identity.as_deref() == Some(identity)).then_some(stored.credentials))
+            }
+            Err(_) => Ok(None),
+        },
         Err(keyring::Error::NoEntry) => Ok(None),
         Err(e) => Err(anyhow::anyhow!("keyring get: {e}")),
     }
@@ -546,7 +676,13 @@ pub fn delete_credentials() -> Result<()> {
     }
 }
 pub fn has_credentials() -> bool {
-    matches!(get_credentials(), Ok(Some(_)))
+    matches!(
+        runtime().read().route,
+        Some(ProxyRoute::Explicit {
+            credentials: Some(_),
+            ..
+        })
+    )
 }
 
 #[cfg(test)]
@@ -639,6 +775,34 @@ mod tests {
             Some(80),
             &["2001:db8::/64".into()]
         ));
+        assert!(no_proxy_matches(
+            "2001:db8::2",
+            Some(443),
+            &["[2001:db8::/64]:443".into()]
+        ));
+    }
+
+    #[test]
+    fn compiled_no_proxy_preserves_bare_ipv6_and_cidr_entries() {
+        let entries = compile_no_proxy_entries(&[
+            "2001:db8::1".into(),
+            "2001:db8::/32".into(),
+            "[2001:db8::1]:443".into(),
+        ])
+        .unwrap();
+
+        assert!(no_proxy_matches_compiled("2001:db8::1", Some(80), &entries));
+        assert!(no_proxy_matches_compiled("2001:db8::2", Some(80), &entries));
+        assert!(no_proxy_matches_compiled(
+            "2001:db8::1",
+            Some(443),
+            &entries
+        ));
+        assert!(!no_proxy_matches_compiled(
+            "2001:db9::1",
+            Some(80),
+            &entries
+        ));
     }
 
     #[test]
@@ -647,7 +811,7 @@ mod tests {
             url: "http://proxy.example:8080".into(),
             credentials: None,
         });
-        let no_proxy = vec!["service.example".into()];
+        let no_proxy = compile_no_proxy_entries(&[String::from("service.example")]).unwrap();
 
         for target in [
             "http://service.example/upload",
@@ -671,7 +835,7 @@ mod tests {
         assert_eq!(
             select_route(
                 Some(ProxyRoute::System),
-                &["internal.example".into()],
+                &compile_no_proxy_entries(&[String::from("internal.example")]).unwrap(),
                 &Url::parse("https://internal.example/api").unwrap(),
             )
             .unwrap(),

@@ -16,12 +16,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::{anyhow, Context, Result};
-use futures_util::StreamExt;
+use anyhow::{anyhow, Result};
 use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::io::AsyncWriteExt;
 use tracing::{debug, info, warn};
 use whisper_rs::{WhisperVadContext, WhisperVadContextParams, WhisperVadParams, WhisperVadSegment};
 
@@ -166,81 +164,17 @@ pub async fn download_vad(app: &AppHandle) -> Result<PathBuf> {
     if target.exists() {
         return Ok(target);
     }
-    let tmp = target.with_extension("bin.part");
-    let _ = fs::remove_file(&tmp);
-
     let url = url::Url::parse(VAD_MODEL_URL)?;
-    #[cfg(windows)]
-    if matches!(
-        crate::services::proxy::route_for_url(&url)?,
-        crate::services::proxy::ProxyRoute::System
-    ) {
-        let tmp_for_worker = tmp.clone();
-        let app_for_worker = app.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut file = fs::File::create(&tmp_for_worker)?;
-            crate::services::winhttp_download::download(
-                &url,
-                VAD_MODEL_SIZE_BYTES,
-                |chunk, downloaded, total| {
-                    use std::io::Write;
-                    file.write_all(chunk).is_ok() && {
-                        let _ = app_for_worker.emit(
-                            "vad:download:progress",
-                            VadDownloadProgress { downloaded, total },
-                        );
-                        true
-                    }
-                },
-            )?;
-            file.sync_all()?;
-            Ok::<_, anyhow::Error>(())
-        })
-        .await
-        .map_err(|error| anyhow!("VAD system download worker failed: {error}"))??;
-        fs::rename(&tmp, &target)?;
-        let _ = app.emit(
-            "vad:download:complete",
-            serde_json::json!({ "path": target.to_string_lossy() }),
-        );
-        info!(path = %target.display(), "Modele VAD telecharge via WinHTTP");
-        return Ok(target);
-    }
-    let client =
-        crate::services::proxy::apply_for_url(reqwest::Client::builder(), &url)?.build()?;
-    let result = client
-        .get(VAD_MODEL_URL)
-        .send()
-        .await
-        .with_context(|| format!("GET {VAD_MODEL_URL}"));
-    let resp = result?;
-    if !resp.status().is_success() {
-        anyhow::bail!("HTTP {} depuis {}", resp.status(), VAD_MODEL_URL);
-    }
-    let total = resp.content_length().unwrap_or(VAD_MODEL_SIZE_BYTES);
-
-    let mut file = tokio::fs::File::create(&tmp)
-        .await
-        .with_context(|| format!("create {}", tmp.display()))?;
-    let mut stream = resp.bytes_stream();
-    let mut downloaded: u64 = 0;
-    let mut last_emit = std::time::Instant::now();
-
-    while let Some(chunk) = stream.next().await {
-        let bytes = chunk.context("chunk")?;
-        file.write_all(&bytes).await?;
-        downloaded += bytes.len() as u64;
-        if last_emit.elapsed() >= std::time::Duration::from_millis(100) {
+    crate::services::download::download_to_file(&url, &target, VAD_MODEL_SIZE_BYTES, None, {
+        let app = app.clone();
+        move |downloaded, total| {
             let _ = app.emit(
                 "vad:download:progress",
                 VadDownloadProgress { downloaded, total },
             );
-            last_emit = std::time::Instant::now();
         }
-    }
-    file.flush().await?;
-    drop(file);
-    fs::rename(&tmp, &target)?;
+    })
+    .await?;
 
     let _ = app.emit(
         "vad:download:complete",

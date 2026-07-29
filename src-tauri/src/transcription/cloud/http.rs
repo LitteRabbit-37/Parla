@@ -130,11 +130,7 @@ impl BatchHttpClient {
             }
             crate::services::proxy::ProxyRoute::Direct
             | crate::services::proxy::ProxyRoute::Explicit { .. } => {
-                let client =
-                    crate::services::proxy::apply_for_url(reqwest::Client::builder(), &url)?
-                        .timeout(timeout)
-                        .connect_timeout(CONNECT_TIMEOUT)
-                        .build()?;
+                let client = crate::services::proxy::client_for_url(&url)?;
                 let mut builder = client
                     .request(
                         request
@@ -143,7 +139,8 @@ impl BatchHttpClient {
                             .map_err(|e| anyhow!("http method: {e}"))?,
                         url,
                     )
-                    .body(request.body);
+                    .body(request.body)
+                    .timeout(timeout);
                 for (name, value) in request.headers {
                     builder = builder.header(name, value);
                 }

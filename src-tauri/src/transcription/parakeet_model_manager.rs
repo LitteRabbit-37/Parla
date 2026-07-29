@@ -18,11 +18,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use futures_util::StreamExt;
 use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::io::AsyncWriteExt;
 use tracing::info;
 
 #[derive(Debug, Clone, Copy)]
@@ -323,7 +321,9 @@ impl ParakeetModelManager {
         // Deux passes : d'abord HEAD pour additionner les total bytes (pour
         // afficher une progression globale coherente), puis GET sequentiel.
         let mut total_global: u64 = 0;
+        const HEAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
         let mut missing: Vec<&str> = Vec::new();
+        let mut all_heads_succeeded = true;
         for f in v.files {
             let target = dir.join(f);
             if target.exists() {
@@ -331,34 +331,33 @@ impl ParakeetModelManager {
             }
             missing.push(f);
             #[cfg(windows)]
-            #[cfg(windows)]
             if matches!(
                 crate::services::proxy::route_for_url(&url::Url::parse(&file_url(v.repo, f))?)?,
                 crate::services::proxy::ProxyRoute::System
             ) {
+                // System-mode downloads do not expose HEAD metadata. A mixed
+                // system/direct batch must therefore use the catalog estimate
+                // instead of summing only direct-route files.
+                all_heads_succeeded = false;
                 continue;
             }
             let url = file_url(v.repo, f);
             let url_parsed = url::Url::parse(&url)?;
-            let client = crate::services::proxy::apply_for_url(
-                reqwest::Client::builder()
-                    .timeout(crate::transcription::cloud::http::BATCH_TIMEOUT)
-                    .connect_timeout(crate::transcription::cloud::http::CONNECT_TIMEOUT),
-                &url_parsed,
-            )?
-            .build()
-            .map_err(|e| anyhow!("http client: {e}"))?;
-            if let Ok(resp) = client.head(&url).send().await {
+            let client = crate::services::proxy::client_for_url(&url_parsed)?;
+            if let Ok(Ok(resp)) = tokio::time::timeout(HEAD_TIMEOUT, client.head(&url).send()).await
+            {
                 if let Some(len) = resp.content_length() {
                     total_global += len;
+                } else {
+                    all_heads_succeeded = false;
                 }
+            } else {
+                all_heads_succeeded = false;
             }
         }
-        if total_global == 0 {
-            // Tout est deja present ou head failed : fallback sur la taille
-            // declaree dans le catalogue.
-            total_global = v.size_bytes;
-        }
+        // A partial HEAD sum is worse than the catalog estimate because it
+        // makes aggregate progress exceed its declared total.
+        total_global = progress_total(total_global, v.size_bytes, all_heads_succeeded);
 
         let mut downloaded_global: u64 = 0;
         for f in missing {
@@ -367,106 +366,43 @@ impl ParakeetModelManager {
             }
             let url = file_url(v.repo, f);
             let target = dir.join(f);
-            let tmp = target.with_extension("part");
-            let _ = fs::remove_file(&tmp);
-
-            #[cfg(windows)]
-            if matches!(
-                crate::services::proxy::route_for_url(&url::Url::parse(&url)?)?,
-                crate::services::proxy::ProxyRoute::System
-            ) {
-                let app = self.app.clone();
-                let id_owned = id.to_owned();
-                let file_name = f.to_owned();
-                let cancel_for_worker = cancel.clone();
-                let url_parsed = url::Url::parse(&url)?;
-                let tmp_for_worker = tmp.clone();
-                let total = total_global;
-                tokio::task::spawn_blocking(move || {
-                    let mut file = fs::File::create(&tmp_for_worker)?;
-                    crate::services::winhttp_download::download(
-                        &url_parsed,
-                        0,
-                        |chunk, downloaded, _| {
-                            use std::io::Write;
-                            if cancel_for_worker.load(std::sync::atomic::Ordering::SeqCst) {
-                                return false;
-                            }
-                            if file.write_all(chunk).is_err() {
-                                return false;
-                            }
-                            let _ = app.emit(
-                                "parakeet_model:download:progress",
-                                DownloadProgress {
-                                    id: id_owned.clone(),
-                                    downloaded: downloaded,
-                                    total,
-                                    current_file: file_name.clone(),
-                                },
-                            );
-                            true
-                        },
-                    )?;
-                    file.sync_all()?;
-                    Ok::<_, anyhow::Error>(())
-                })
-                .await
-                .map_err(|error| anyhow!("Parakeet system download worker failed: {error}"))??;
-                fs::rename(&tmp, &target)?;
-                continue;
-            }
-
             let url_parsed = url::Url::parse(&url)?;
-            let client = crate::services::proxy::apply_for_url(
-                reqwest::Client::builder()
-                    .timeout(crate::transcription::cloud::http::BATCH_TIMEOUT)
-                    .connect_timeout(crate::transcription::cloud::http::CONNECT_TIMEOUT),
+            let previous = downloaded_global;
+            let id_owned = id.to_string();
+            let file_name = f.to_string();
+            let downloaded = crate::services::download::download_to_file(
                 &url_parsed,
-            )?
-            .build()
-            .map_err(|e| anyhow!("http client: {e}"))?;
-            let resp = client
-                .get(&url)
-                .send()
-                .await
-                .with_context(|| format!("GET {url}"))?;
-            if !resp.status().is_success() {
-                anyhow::bail!("HTTP {} depuis {url}", resp.status());
-            }
-
-            let mut file = tokio::fs::File::create(&tmp)
-                .await
-                .with_context(|| format!("create {}", tmp.display()))?;
-            let mut stream = resp.bytes_stream();
-            let mut last_emit = std::time::Instant::now();
-            while let Some(chunk) = stream.next().await {
-                if cancel.load(std::sync::atomic::Ordering::SeqCst) {
-                    drop(file);
-                    let _ = fs::remove_file(&tmp);
-                    self.cancel_flags.lock().remove(id);
-                    return Err(anyhow!("telechargement annule"));
-                }
-                let bytes = chunk.context("chunk recv")?;
-                file.write_all(&bytes).await?;
-                downloaded_global += bytes.len() as u64;
-                if last_emit.elapsed() >= std::time::Duration::from_millis(50) {
-                    let _ = self.app.emit(
-                        "parakeet_model:download:progress",
-                        DownloadProgress {
-                            id: id.to_string(),
-                            downloaded: downloaded_global,
-                            total: total_global,
-                            current_file: f.to_string(),
-                        },
-                    );
-                    last_emit = std::time::Instant::now();
-                }
-            }
-            file.flush().await?;
-            drop(file);
-            fs::rename(&tmp, &target)
-                .with_context(|| format!("rename {} -> {}", tmp.display(), target.display()))?;
+                &target,
+                0,
+                Some(cancel.clone()),
+                {
+                    let app = self.app.clone();
+                    move |current, _| {
+                        let _ = app.emit(
+                            "parakeet_model:download:progress",
+                            DownloadProgress {
+                                id: id_owned.clone(),
+                                downloaded: previous + current,
+                                total: total_global,
+                                current_file: file_name.clone(),
+                            },
+                        );
+                    }
+                },
+            )
+            .await?;
+            downloaded_global += downloaded;
         }
+
+        let _ = self.app.emit(
+            "parakeet_model:download:progress",
+            DownloadProgress {
+                id: id.to_string(),
+                downloaded: downloaded_global,
+                total: total_global.max(downloaded_global),
+                current_file: String::new(),
+            },
+        );
 
         let _ = self.app.emit(
             "parakeet_model:download:complete",
@@ -480,8 +416,24 @@ impl ParakeetModelManager {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn system_mode_head_skip_forces_catalog_total() {
+        assert_eq!(super::progress_total(123, 456, false), 456);
+    }
+}
+
 fn file_url(repo: &str, file: &str) -> String {
     format!("https://huggingface.co/{repo}/resolve/main/{file}")
+}
+
+fn progress_total(total_global: u64, catalog_total: u64, all_heads_succeeded: bool) -> u64 {
+    if !all_heads_succeeded || total_global == 0 {
+        catalog_total
+    } else {
+        total_global
+    }
 }
 
 pub struct ParakeetModelManagerState(pub Arc<ParakeetModelManager>);

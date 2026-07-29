@@ -48,28 +48,58 @@ pub fn set_proxy_settings(app: AppHandle, settings: ProxySettings) -> Result<(),
         .filter(|u| !u.trim().is_empty())
         .map(proxy::sanitize_proxy_url)
         .transpose()?;
-    if let Some((url, credentials)) = embedded_credentials {
-        settings.url = Some(url);
-        if let Some((username, password)) = credentials {
-            let identity = proxy::proxy_identity(settings.url.as_deref().unwrap())
-                .map_err(|e| e.to_string())?;
-            proxy::set_credentials_for(&username, &password, &identity)
-                .map_err(|e| e.to_string())?;
-        }
-    }
     proxy::validate_settings(
         settings.enabled,
-        settings.url.as_deref(),
+        embedded_credentials
+            .as_ref()
+            .map(|(url, _)| url.as_str())
+            .or(settings.url.as_deref()),
         &settings.no_proxy_entries,
     )?;
+    let credentials = embedded_credentials.as_ref().and_then(|(_, credentials)| {
+        credentials
+            .as_ref()
+            .map(|(username, password)| (username.clone(), password.clone()))
+    });
+    if let Some((url, _)) = embedded_credentials {
+        settings.url = Some(url);
+    }
+    let credential_identity = credentials
+        .as_ref()
+        .map(|_| proxy::proxy_identity(settings.url.as_deref().unwrap()))
+        .transpose()
+        .map_err(|e| e.to_string())?;
     let store = app.store(STORE_FILE).map_err(|e| e.to_string())?;
     let previous = store.get(PROXY_SETTINGS_KEY);
+    let previous_credentials = proxy::snapshot_credentials().map_err(|e| e.to_string())?;
     store.set(
         PROXY_SETTINGS_KEY,
         serde_json::to_value(settings).map_err(|e| e.to_string())?,
     );
     if let Err(error) = store.save() {
+        match previous.as_ref() {
+            Some(value) => store.set(PROXY_SETTINGS_KEY, value.clone()),
+            None => {
+                store.delete(PROXY_SETTINGS_KEY);
+            }
+        }
+        let _ = store.save();
         return Err(error.to_string());
+    }
+    if let Some((username, password)) = credentials {
+        let identity = credential_identity.expect("credential identity validated above");
+        if let Err(error) = proxy::set_credentials_for(&username, &password, &identity) {
+            match previous.as_ref() {
+                Some(value) => {
+                    store.set(PROXY_SETTINGS_KEY, value.clone());
+                }
+                None => {
+                    store.delete(PROXY_SETTINGS_KEY);
+                }
+            }
+            let _ = store.save();
+            return Err(error.to_string());
+        }
     }
     if let Err(error) = proxy::configure(&app) {
         match previous {
@@ -81,6 +111,7 @@ pub fn set_proxy_settings(app: AppHandle, settings: ProxySettings) -> Result<(),
             }
         }
         let _ = store.save();
+        let _ = proxy::restore_credentials(&previous_credentials);
         let _ = proxy::configure(&app);
         return Err(error.to_string());
     }
@@ -98,13 +129,35 @@ pub fn set_proxy_credentials(
         .as_deref()
         .ok_or("proxy URL required for credentials")?;
     let identity = proxy::proxy_identity(url).map_err(|e| e.to_string())?;
+    let previous_credentials = proxy::snapshot_credentials().map_err(|e| e.to_string())?;
     proxy::set_credentials_for(&username, &password, &identity).map_err(|e| e.to_string())?;
-    proxy::configure(&app).map_err(|e| e.to_string())
+    if let Err(error) = proxy::configure(&app) {
+        let restore_error = proxy::restore_credentials(&previous_credentials).err();
+        let _ = proxy::configure(&app);
+        return Err(match restore_error {
+            Some(restore_error) => {
+                format!("{error}; could not restore credentials: {restore_error}")
+            }
+            None => error.to_string(),
+        });
+    }
+    Ok(())
 }
 #[tauri::command]
 pub fn delete_proxy_credentials(app: AppHandle) -> Result<(), String> {
+    let previous_credentials = proxy::snapshot_credentials().map_err(|e| e.to_string())?;
     proxy::delete_credentials().map_err(|e| e.to_string())?;
-    proxy::configure(&app).map_err(|e| e.to_string())
+    if let Err(error) = proxy::configure(&app) {
+        let restore_error = proxy::restore_credentials(&previous_credentials).err();
+        let _ = proxy::configure(&app);
+        return Err(match restore_error {
+            Some(restore_error) => {
+                format!("{error}; could not restore credentials: {restore_error}")
+            }
+            None => error.to_string(),
+        });
+    }
+    Ok(())
 }
 #[tauri::command]
 pub fn has_proxy_credentials() -> bool {
