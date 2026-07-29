@@ -79,43 +79,6 @@ async fn rename_unless_cancelled(
     Ok(())
 }
 
-/// Aggregates progress when one logical download consists of several files.
-#[derive(Debug, Default)]
-pub struct DownloadProgressAggregator {
-    pub total: u64,
-    completed: u64,
-    current: Option<(String, u64)>,
-}
-
-impl DownloadProgressAggregator {
-    pub fn new(total: u64) -> Self {
-        Self {
-            total,
-            ..Default::default()
-        }
-    }
-
-    pub fn update(&mut self, file: &str, downloaded: u64) -> u64 {
-        self.current = Some((file.to_owned(), downloaded));
-        self.completed + downloaded
-    }
-
-    pub fn complete_file(&mut self, file: &str, size: u64) -> u64 {
-        let current = self
-            .current
-            .take()
-            .filter(|(name, _)| name == file)
-            .map(|(_, n)| n)
-            .unwrap_or(size);
-        self.completed += current;
-        self.completed
-    }
-
-    pub fn complete(&self) -> u64 {
-        self.completed
-    }
-}
-
 /// Download URL to target through configured proxy route, writing atomically.
 /// Progress callback receives downloaded bytes and total bytes.
 pub async fn download_to_file<F>(

@@ -25,16 +25,9 @@ pub enum ProxyRoute {
     },
 }
 
-#[derive(Debug, Clone)]
-pub struct RouteDiagnostic {
-    pub kind: &'static str,
-    pub scheme: Option<String>,
-    pub host: Option<String>,
-    pub port: Option<u16>,
-}
-
 /// Application-owned NO_PROXY matcher. Kept separate from reqwest so every
 /// transport (including WebSocket) makes the same routing decision.
+#[cfg(test)]
 pub fn no_proxy_matches(host: &str, port: Option<u16>, entries: &[String]) -> bool {
     let host = host.trim_end_matches('.').to_ascii_lowercase();
     let ip = host.parse::<std::net::IpAddr>().ok();
@@ -165,14 +158,6 @@ struct StoredSettings {
     no_proxy_entries: Vec<String>,
 }
 
-/// Apply policy after resolving destination. This is required for System mode:
-/// reqwest proxy callbacks cannot return resolver errors and would otherwise
-/// silently turn a failed WinHTTP lookup into a direct connection.
-pub fn apply_for_url(builder: reqwest::ClientBuilder, url: &Url) -> Result<reqwest::ClientBuilder> {
-    let route = route_for_url(url)?;
-    apply_route(builder, route)
-}
-
 /// Return cached client for Direct or Explicit route. System must never use reqwest.
 pub fn client_for_url(url: &Url) -> Result<reqwest::Client> {
     let selected = route_for_url(url)?;
@@ -217,68 +202,6 @@ fn build_client(route: ProxyRoute, no_proxy: &[CompiledNoProxyEntry]) -> Result<
         ProxyRoute::System => anyhow::bail!("system proxy requires WinHTTP"),
     }
     Ok(builder.build()?)
-}
-
-/// Applies routing and returns metadata safe for diagnostics. Never includes
-/// proxy userinfo, credentials, PAC data, or the destination URL.
-pub fn apply_for_url_with_diagnostic(
-    builder: reqwest::ClientBuilder,
-    url: &Url,
-) -> Result<(reqwest::ClientBuilder, RouteDiagnostic)> {
-    let route = route_for_url(url)?;
-    let diagnostic = route_diagnostic(&route);
-    Ok((apply_route(builder, route)?, diagnostic))
-}
-
-fn route_diagnostic(route: &ProxyRoute) -> RouteDiagnostic {
-    match route {
-        ProxyRoute::Direct => RouteDiagnostic {
-            kind: "direct",
-            scheme: None,
-            host: None,
-            port: None,
-        },
-        ProxyRoute::System => RouteDiagnostic {
-            kind: "system",
-            scheme: None,
-            host: None,
-            port: None,
-        },
-        ProxyRoute::Explicit { url, .. } => {
-            let parsed = Url::parse(url).ok();
-            RouteDiagnostic {
-                kind: "explicit",
-                scheme: parsed.as_ref().map(|value| value.scheme().to_owned()),
-                host: parsed
-                    .as_ref()
-                    .and_then(|value| value.host_str().map(str::to_owned)),
-                port: parsed
-                    .as_ref()
-                    .and_then(|value| value.port_or_known_default()),
-            }
-        }
-    }
-}
-
-fn apply_route(
-    builder: reqwest::ClientBuilder,
-    route: ProxyRoute,
-) -> Result<reqwest::ClientBuilder> {
-    let builder = match route {
-        ProxyRoute::Direct => builder.no_proxy(),
-        ProxyRoute::System => anyhow::bail!("unresolved system proxy route"),
-        ProxyRoute::Explicit { url, credentials } => {
-            let mut proxy = reqwest::Proxy::all(&url).map_err(|e| {
-                let diagnostic = crate::services::download::sanitize_message(&e.to_string());
-                anyhow::anyhow!("proxy: {diagnostic}")
-            })?;
-            if let Some(c) = credentials {
-                proxy = proxy.basic_auth(&c.username, &c.password);
-            }
-            builder.proxy(proxy)
-        }
-    };
-    Ok(builder)
 }
 
 pub fn route_for_url(url: &Url) -> Result<ProxyRoute> {
@@ -603,19 +526,6 @@ pub fn route(
 fn entry() -> Result<Entry> {
     Entry::new(CREDENTIAL_SERVICE, CREDENTIAL_KEY).context("proxy credential keyring entry")
 }
-pub fn get_credentials() -> Result<Option<ProxyCredentials>> {
-    match entry()?.get_password() {
-        Ok(value) => Ok(Some(
-            serde_json::from_str::<StoredCredentials>(&value)
-                .map(|v| v.credentials)
-                .or_else(|_| serde_json::from_str(&value))
-                .context("invalid proxy credentials")?,
-        )),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(anyhow::anyhow!("keyring get: {e}")),
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredCredentials {
     credentials: ProxyCredentials,

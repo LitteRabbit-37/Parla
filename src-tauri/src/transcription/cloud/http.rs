@@ -13,9 +13,6 @@ use url::Url;
 /// 120s est large : Whisper large sur 30min d'audio prend ~30-60s cote cloud.
 pub const BATCH_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Timeout pour l'etablissement de la connexion TCP/TLS.
-pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-
 /// Request body independent of the HTTP implementation selected by proxy
 /// policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
