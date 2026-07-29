@@ -367,12 +367,9 @@ fn connect_blocking(
         }
         return Err(anyhow!("start WinHTTP websocket thread: {error}"));
     }
-    if let Err(error) = ready_rx
+    ready_rx
         .recv()
-        .map_err(|_| anyhow!("WinHTTP websocket coordinator stopped"))?
-    {
-        return Err(error);
-    }
+        .map_err(|_| anyhow!("WinHTTP websocket coordinator stopped"))??;
     Ok(StreamingSocket {
         write: Box::new(ChannelWrite {
             tx: send_tx.clone(),
@@ -572,6 +569,17 @@ pub struct Response {
     pub body: Vec<u8>,
 }
 
+struct RequestParts<'a> {
+    host: &'a [u16],
+    target: &'a [u16],
+    method: &'a [u16],
+    headers: &'a [u16],
+    port: u16,
+    secure: bool,
+    body: &'a [u8],
+    timeout: Duration,
+}
+
 pub fn request(
     method: &str,
     url: &str,
@@ -606,29 +614,20 @@ pub fn request(
         })?;
     let header_text = wide(&header_text);
     unsafe {
-        request_inner(
-            &host,
-            &target,
-            &method,
-            &header_text,
-            url.port_or_known_default().unwrap_or(443),
-            url.scheme().eq_ignore_ascii_case("https"),
+        request_inner(&RequestParts {
+            host: &host,
+            target: &target,
+            method: &method,
+            headers: &header_text,
+            port: url.port_or_known_default().unwrap_or(443),
+            secure: url.scheme().eq_ignore_ascii_case("https"),
             body,
             timeout,
-        )
+        })
     }
 }
 
-unsafe fn request_inner(
-    host: &[u16],
-    target: &[u16],
-    method: &[u16],
-    headers: &[u16],
-    port: u16,
-    secure: bool,
-    body: &[u8],
-    timeout: Duration,
-) -> Result<Response> {
+unsafe fn request_inner(parts: &RequestParts<'_>) -> Result<Response> {
     let session = WinHttpOpen(
         PCWSTR::null(),
         WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
@@ -640,9 +639,10 @@ unsafe fn request_inner(
         return Err(win_error("open session"));
     }
     let session = HandleGuard(session);
-    let timeout_ms = timeout
+    let timeout_ms = parts
+        .timeout
         .as_millis()
-        .max((!timeout.is_zero()) as u128)
+        .max((!parts.timeout.is_zero()) as u128)
         .min(i32::MAX as u128) as i32;
     WinHttpSetTimeouts(
         session.0,
@@ -660,20 +660,20 @@ unsafe fn request_inner(
             std::mem::size_of_val(&policy),
         )),
     )?;
-    let connection = WinHttpConnect(session.0, PCWSTR(host.as_ptr()), port, 0);
+    let connection = WinHttpConnect(session.0, PCWSTR(parts.host.as_ptr()), parts.port, 0);
     if connection.is_null() {
         return Err(win_error("connect"));
     }
     let connection = HandleGuard(connection);
-    let flags = if secure {
+    let flags = if parts.secure {
         WINHTTP_FLAG_SECURE
     } else {
         WINHTTP_OPEN_REQUEST_FLAGS(0)
     };
     let request = WinHttpOpenRequest(
         connection.0,
-        PCWSTR(method.as_ptr()),
-        PCWSTR(target.as_ptr()),
+        PCWSTR(parts.method.as_ptr()),
+        PCWSTR(parts.target.as_ptr()),
         PCWSTR::null(),
         PCWSTR::null(),
         std::ptr::null(),
@@ -683,13 +683,14 @@ unsafe fn request_inner(
         return Err(win_error("open request"));
     }
     let request = HandleGuard(request);
-    let body_len = u32::try_from(body.len())
+    let body_len = u32::try_from(parts.body.len())
         .map_err(|_| anyhow!("WinHTTP request body is too large (maximum 4 GiB)"))?;
-    let header_ptr = (!headers.is_empty()).then_some(&headers[..headers.len() - 1]);
+    let header_ptr =
+        (!parts.headers.is_empty()).then_some(&parts.headers[..parts.headers.len() - 1]);
     WinHttpSendRequest(
         request.0,
         header_ptr,
-        (!body.is_empty()).then_some(body.as_ptr().cast()),
+        (!parts.body.is_empty()).then_some(parts.body.as_ptr().cast()),
         body_len,
         body_len,
         0,

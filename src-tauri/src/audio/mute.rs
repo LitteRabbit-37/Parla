@@ -250,9 +250,9 @@ mod windows_audio {
                 .Activate(CLSCTX_ALL, None)
                 .map_err(|e| anyhow!("IMMDevice::Activate: {e}"))?
         };
-        Ok(volume
+        volume
             .cast()
-            .map_err(|e| anyhow!("cast IAudioEndpointVolume: {e}"))?)
+            .map_err(|e| anyhow!("cast IAudioEndpointVolume: {e}"))
     }
 
     pub fn read_mute() -> Result<bool> {

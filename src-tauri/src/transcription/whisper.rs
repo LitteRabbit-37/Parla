@@ -14,7 +14,7 @@ use tracing::{debug, info};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 /// Parametres d'une session de transcription (modeles utiles pour Phase 1c).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct WhisperParams {
     /// Code langue ISO 639-1 (ex "fr", "en"). `None` = auto-detect.
     pub language: Option<String>,
@@ -22,16 +22,6 @@ pub struct WhisperParams {
     pub initial_prompt: Option<String>,
     /// Nombre de threads CPU. 0 = auto (nombre de cores physiques).
     pub n_threads: usize,
-}
-
-impl Default for WhisperParams {
-    fn default() -> Self {
-        Self {
-            language: None,
-            initial_prompt: None,
-            n_threads: 0,
-        }
-    }
 }
 
 /// Contexte Whisper charge : encapsule le modele en memoire, reutilisable entre

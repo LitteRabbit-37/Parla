@@ -191,7 +191,7 @@ where
             check_cancellation(Some(&post_worker_cancel))?;
             rename_unless_cancelled(&tmp, target, Some(&post_worker_cancel)).await?;
             cancellation.disarm();
-            return Ok(result);
+            Ok(result)
         }
 
         #[cfg(not(windows))]

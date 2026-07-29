@@ -198,21 +198,20 @@ fn num_cpus_physical() -> i32 {
         .unwrap_or(4)
 }
 
+type VadResult = Result<(Vec<f32>, Vec<(usize, usize)>)>;
+
 /// Applique la VAD sur un WAV 16 kHz mono et retourne les plages de samples
 /// (start, end) a transcrire. Ces plages ont deja subi le padding de
 /// `speech_pad_ms` en interne par whisper.cpp.
-pub fn run_vad_on_wav(
-    engine: &VadEngine,
-    wav_path: &Path,
-) -> Result<(Vec<f32>, Vec<(usize, usize)>)> {
+pub fn run_vad_on_wav(engine: &VadEngine, wav_path: &Path) -> VadResult {
     let samples = super::whisper::read_wav_as_f32(wav_path)?;
     let segs = engine.segments(&samples)?;
     // Les segments de whisper.cpp sont en centisecondes cote start/end.
     let ranges: Vec<(usize, usize)> = segs
         .into_iter()
         .map(|WhisperVadSegment { start, end }| {
-            let start_sample = ((start as f32 / 100.0) * 16_000.0) as usize;
-            let end_sample = ((end as f32 / 100.0) * 16_000.0) as usize;
+            let start_sample = ((start / 100.0) * 16_000.0) as usize;
+            let end_sample = ((end / 100.0) * 16_000.0) as usize;
             (
                 start_sample.min(samples.len()),
                 end_sample.min(samples.len()),

@@ -141,11 +141,10 @@ fn handle_text(
     };
 
     // Control / metadata : type == "Metadata" / "SpeechStarted" / "UtteranceEnd"
-    if let Some(kind) = json.get("type").and_then(|v| v.as_str()) {
-        match kind {
-            "Metadata" | "SpeechStarted" | "UtteranceEnd" => return,
-            _ => {}
-        }
+    if let Some("Metadata" | "SpeechStarted" | "UtteranceEnd") =
+        json.get("type").and_then(|v| v.as_str())
+    {
+        return;
     }
     if let Some(err) = json.get("error").and_then(|v| v.as_str()) {
         on_event(StreamingEvent::Error {

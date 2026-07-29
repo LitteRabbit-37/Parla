@@ -14,23 +14,13 @@ use crate::transcription::pipeline;
 const STORE_FILE: &str = "parla.settings.json";
 const PROXY_SETTINGS_KEY: &str = "proxy_settings";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProxySettings {
     pub enabled: bool,
     pub url: Option<String>,
     #[serde(default)]
     pub no_proxy_entries: Vec<String>,
 }
-impl Default for ProxySettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            url: None,
-            no_proxy_entries: Vec::new(),
-        }
-    }
-}
-
 #[tauri::command]
 pub fn get_proxy_settings(app: AppHandle) -> ProxySettings {
     app.store(STORE_FILE)

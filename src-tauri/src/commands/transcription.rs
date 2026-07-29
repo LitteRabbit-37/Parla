@@ -63,7 +63,6 @@ pub async fn transcribe_wav(
         language: req.language,
         initial_prompt: req.initial_prompt,
         n_threads: req.n_threads.unwrap_or(0),
-        ..Default::default()
     };
 
     let model_id = req.model_id.clone();

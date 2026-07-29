@@ -76,7 +76,7 @@ pub fn backup_all() -> Result<Backup> {
 
     let mut entries = Vec::new();
     let mut fmt = 0u32;
-    let result = (|| -> Result<()> {
+    let result: Result<()> = {
         loop {
             fmt = unsafe { EnumClipboardFormats(fmt) };
             if fmt == 0 {
@@ -99,7 +99,7 @@ pub fn backup_all() -> Result<Backup> {
             }
         }
         Ok(())
-    })();
+    };
 
     unsafe {
         let _ = CloseClipboard();
@@ -168,7 +168,7 @@ fn write_format_bytes(format: u32, bytes: &[u8]) -> Result<()> {
         if hmem.is_invalid() {
             return Err(anyhow!("GlobalAlloc a retourne un handle invalide"));
         }
-        let dst = GlobalLock(hmem) as *mut c_void;
+        let dst = GlobalLock(hmem);
         if dst.is_null() {
             return Err(anyhow!("GlobalLock (write) a echoue"));
         }
