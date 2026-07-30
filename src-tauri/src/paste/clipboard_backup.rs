@@ -29,7 +29,9 @@ use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, EnumClipboardFormats, GetClipboardData, OpenClipboard,
     SetClipboardData,
 };
-use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
+use windows::Win32::System::Memory::{
+    GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE,
+};
 
 /// Format enregistre pour lequel on a sauvegarde les bytes.
 #[derive(Debug, Clone)]
@@ -49,10 +51,7 @@ impl Backup {
     /// Utilise comme fallback si backup_all echoue.
     pub fn text_only(text: String) -> Self {
         // CF_UNICODETEXT = 13, bytes = utf-16 LE + null terminator (2 bytes).
-        let mut bytes: Vec<u8> = text
-            .encode_utf16()
-            .flat_map(|u| u.to_le_bytes())
-            .collect();
+        let mut bytes: Vec<u8> = text.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
         bytes.push(0);
         bytes.push(0);
         Self {
@@ -72,20 +71,22 @@ fn is_skipped_format(format: u32) -> bool {
 /// Ouvre le clipboard, enumere tous les formats, copie les bytes de chacun.
 pub fn backup_all() -> Result<Backup> {
     unsafe {
-        OpenClipboard(Some(HWND(ptr::null_mut())))
-            .map_err(|e| anyhow!("OpenClipboard: {e}"))?;
+        OpenClipboard(Some(HWND(ptr::null_mut()))).map_err(|e| anyhow!("OpenClipboard: {e}"))?;
     }
 
     let mut entries = Vec::new();
     let mut fmt = 0u32;
-    let result = (|| -> Result<()> {
+    let result: Result<()> = {
         loop {
             fmt = unsafe { EnumClipboardFormats(fmt) };
             if fmt == 0 {
                 break;
             }
             if is_skipped_format(fmt) {
-                debug!(format = fmt, "format clipboard skip (handle non byte-copyable)");
+                debug!(
+                    format = fmt,
+                    "format clipboard skip (handle non byte-copyable)"
+                );
                 continue;
             }
             match read_format_bytes(fmt) {
@@ -98,7 +99,7 @@ pub fn backup_all() -> Result<Backup> {
             }
         }
         Ok(())
-    })();
+    };
 
     unsafe {
         let _ = CloseClipboard();
@@ -109,7 +110,8 @@ pub fn backup_all() -> Result<Backup> {
 
 fn read_format_bytes(format: u32) -> Result<Vec<u8>> {
     unsafe {
-        let handle = GetClipboardData(format).map_err(|e| anyhow!("GetClipboardData {format}: {e}"))?;
+        let handle =
+            GetClipboardData(format).map_err(|e| anyhow!("GetClipboardData {format}: {e}"))?;
         if handle.is_invalid() {
             return Err(anyhow!("handle clipboard invalide"));
         }
@@ -166,7 +168,7 @@ fn write_format_bytes(format: u32, bytes: &[u8]) -> Result<()> {
         if hmem.is_invalid() {
             return Err(anyhow!("GlobalAlloc a retourne un handle invalide"));
         }
-        let dst = GlobalLock(hmem) as *mut c_void;
+        let dst = GlobalLock(hmem);
         if dst.is_null() {
             return Err(anyhow!("GlobalLock (write) a echoue"));
         }

@@ -6,7 +6,9 @@
 // Pour la voix cela reste suffisamment rapide en temps reel.
 
 use anyhow::{anyhow, Result};
-use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
+use rubato::{
+    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+};
 
 use super::TARGET_SAMPLE_RATE;
 
@@ -73,7 +75,7 @@ impl MonoResampler {
     /// pour atteindre un chunk complet. A appeler a la fin de l'enregistrement.
     pub fn flush(&mut self, out: &mut Vec<f32>) -> Result<()> {
         let Some(inner) = self.inner.as_mut() else {
-            out.extend(self.carry.drain(..));
+            out.append(&mut self.carry);
             return Ok(());
         };
         if self.carry.is_empty() {

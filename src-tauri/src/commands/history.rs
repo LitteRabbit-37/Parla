@@ -70,7 +70,10 @@ pub fn count_history(app: AppHandle) -> Result<i64, String> {
 }
 
 #[command]
-pub async fn export_history_csv(app: AppHandle, ids: Vec<String>) -> Result<Option<String>, String> {
+pub async fn export_history_csv(
+    app: AppHandle,
+    ids: Vec<String>,
+) -> Result<Option<String>, String> {
     // Collect les records a exporter.
     let db = app
         .try_state::<Database>()
@@ -110,10 +113,7 @@ pub fn get_retention_settings(app: AppHandle) -> RetentionSettings {
 }
 
 #[command]
-pub fn set_retention_settings(
-    app: AppHandle,
-    settings: RetentionSettings,
-) -> Result<(), String> {
+pub fn set_retention_settings(app: AppHandle, settings: RetentionSettings) -> Result<(), String> {
     cleanup::save(&app, &settings).map_err(|e| e.to_string())?;
     // Declenche un passage immediat pour appliquer les nouveaux criteres.
     cleanup::run_once(&app);

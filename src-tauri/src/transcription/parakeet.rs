@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use parking_lot::Mutex;
 use parakeet_rs::{ParakeetTDT, Transcriber};
+use parking_lot::Mutex;
 
 struct Loaded {
     path: PathBuf,

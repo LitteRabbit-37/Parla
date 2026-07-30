@@ -70,16 +70,16 @@ pub fn load(app: &AppHandle) -> RetentionSettings {
 }
 
 pub fn save(app: &AppHandle, s: &RetentionSettings) -> Result<()> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| anyhow!("store: {e}"))?;
+    let store = app.store(STORE_FILE).map_err(|e| anyhow!("store: {e}"))?;
     store.set(
         KEY_TRANSC_CLEAN,
         serde_json::Value::Bool(s.transcription_cleanup),
     );
     store.set(
         KEY_TRANSC_MINUTES,
-        serde_json::Value::Number(serde_json::Number::from(s.transcription_retention_minutes.max(0))),
+        serde_json::Value::Number(serde_json::Number::from(
+            s.transcription_retention_minutes.max(0),
+        )),
     );
     store.set(KEY_AUDIO_CLEAN, serde_json::Value::Bool(s.audio_cleanup));
     store.set(
@@ -113,7 +113,8 @@ pub fn run_once(app: &AppHandle) {
     };
 
     if s.transcription_cleanup {
-        let older = Utc::now() - chrono::Duration::minutes(s.transcription_retention_minutes.max(0));
+        let older =
+            Utc::now() - chrono::Duration::minutes(s.transcription_retention_minutes.max(0));
         let wavs = match repo::delete_older_than(&db.0.lock(), older) {
             Ok(v) => v,
             Err(e) => {
@@ -159,10 +160,7 @@ pub fn run_once(app: &AppHandle) {
                         .collect();
                 if let Ok(iter) = std::fs::read_dir(&dir) {
                     for entry in iter.flatten() {
-                        let name = entry
-                            .file_name()
-                            .to_string_lossy()
-                            .into_owned();
+                        let name = entry.file_name().to_string_lossy().into_owned();
                         if !referenced.contains(&name) {
                             let _ = std::fs::remove_file(entry.path());
                         }

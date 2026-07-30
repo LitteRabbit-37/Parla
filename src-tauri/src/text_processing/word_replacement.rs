@@ -17,9 +17,8 @@ use crate::db::word_replacement::WordReplacement;
 pub fn apply(text: &str, rules: &[WordReplacement]) -> String {
     let mut current = text.to_string();
 
-    let mut sorted_rules: Vec<&WordReplacement> =
-        rules.iter().filter(|r| r.is_enabled).collect();
-    sorted_rules.sort_by(|a, b| b.original_text.len().cmp(&a.original_text.len()));
+    let mut sorted_rules: Vec<&WordReplacement> = rules.iter().filter(|r| r.is_enabled).collect();
+    sorted_rules.sort_by_key(|rule| std::cmp::Reverse(rule.original_text.len()));
 
     for rule in sorted_rules {
         let mut variants: Vec<&str> = rule
@@ -28,7 +27,7 @@ pub fn apply(text: &str, rules: &[WordReplacement]) -> String {
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
             .collect();
-        variants.sort_by(|a, b| b.len().cmp(&a.len()));
+        variants.sort_by_key(|variant| std::cmp::Reverse(variant.len()));
 
         for original in variants {
             if original.is_empty() {
@@ -74,7 +73,8 @@ fn replace_substring_ci(haystack: &str, needle: &str, replacement: &str) -> Stri
         // longueurs de caracteres. On verifie que start et start+needle.len()
         // sont bien des frontieres char_boundary dans l'original.
         let end = start + needle.len();
-        if !haystack.is_char_boundary(start) || !haystack.is_char_boundary(end.min(haystack.len())) {
+        if !haystack.is_char_boundary(start) || !haystack.is_char_boundary(end.min(haystack.len()))
+        {
             // Fallback prudent : skip.
             cursor = start + needle.len().max(1);
             continue;

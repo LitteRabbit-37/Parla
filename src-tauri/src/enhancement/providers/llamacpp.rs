@@ -27,9 +27,7 @@ use llama_cpp_2::model::{AddBos, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::token::LlamaToken;
 
-use crate::enhancement::provider::{
-    EnhancementRequest, EnhancementResponse, LLMProvider,
-};
+use crate::enhancement::provider::{EnhancementRequest, EnhancementResponse, LLMProvider};
 
 const STORE_FILE: &str = "parla.settings.json";
 const KEY_SELECTED_GGUF: &str = "llm_selected_gguf";
@@ -144,7 +142,10 @@ impl LlamaRuntime {
     fn ensure_loaded(&self, path: &Path, n_gpu_layers: u32, context_size: u32) -> Result<()> {
         let mut guard = self.current.lock();
         if let Some(cur) = guard.as_ref() {
-            if cur.path == path && cur.n_gpu_layers == n_gpu_layers && cur.context_size == context_size {
+            if cur.path == path
+                && cur.n_gpu_layers == n_gpu_layers
+                && cur.context_size == context_size
+            {
                 return Ok(());
             }
         }
@@ -199,9 +200,7 @@ impl LlamaRuntime {
         if (tokens_list.len() as u32) + max_tokens > context_size {
             warn!(
                 prompt_tokens = tokens_list.len(),
-                max_tokens,
-                context_size,
-                "Prompt + generation risquent de depasser le contexte"
+                max_tokens, context_size, "Prompt + generation risquent de depasser le contexte"
             );
         }
 
@@ -213,7 +212,8 @@ impl LlamaRuntime {
                 .add(*token, i as i32, &[0], i == last_index)
                 .map_err(|e| anyhow!("batch add prompt: {e}"))?;
         }
-        ctx.decode(&mut batch).map_err(|e| anyhow!("decode prompt: {e}"))?;
+        ctx.decode(&mut batch)
+            .map_err(|e| anyhow!("decode prompt: {e}"))?;
 
         // Greedy sampling : on veut un output deterministe pour l'enhancement.
         let mut sampler = LlamaSampler::greedy();
@@ -234,7 +234,8 @@ impl LlamaRuntime {
             batch
                 .add(token, n_cur, &[0], true)
                 .map_err(|e| anyhow!("batch add tok: {e}"))?;
-            ctx.decode(&mut batch).map_err(|e| anyhow!("decode step: {e}"))?;
+            ctx.decode(&mut batch)
+                .map_err(|e| anyhow!("decode step: {e}"))?;
             n_cur += 1;
         }
 
@@ -328,7 +329,13 @@ impl LLMProvider for LlamaCppProvider {
         let prompt_owned = prompt;
         let path_owned = path;
         tokio::task::spawn_blocking(move || {
-            runtime.generate(&path_owned, n_gpu_layers, context_size, &prompt_owned, max_tokens)
+            runtime.generate(
+                &path_owned,
+                n_gpu_layers,
+                context_size,
+                &prompt_owned,
+                max_tokens,
+            )
         })
         .await
         .map_err(|e| anyhow!("join: {e}"))?

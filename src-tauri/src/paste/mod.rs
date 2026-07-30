@@ -87,7 +87,11 @@ pub fn paste_at_cursor(text: &str, restore: bool, restore_delay: Option<Duration
             Ok(b) => Some(b),
             Err(e) => {
                 warn!("clipboard backup: {e}, fallback texte uniquement");
-                clipboard().lock().get_text().ok().map(clipboard_backup::Backup::text_only)
+                clipboard()
+                    .lock()
+                    .get_text()
+                    .ok()
+                    .map(clipboard_backup::Backup::text_only)
             }
         }
     } else {
@@ -118,7 +122,9 @@ pub fn paste_at_cursor(text: &str, restore: bool, restore_delay: Option<Duration
     send_ctrl_v()?;
 
     if let Some(prev) = backup {
-        let delay = restore_delay.unwrap_or(MIN_RESTORE_DELAY).max(MIN_RESTORE_DELAY);
+        let delay = restore_delay
+            .unwrap_or(MIN_RESTORE_DELAY)
+            .max(MIN_RESTORE_DELAY);
         sleep(delay);
         #[cfg(windows)]
         {
@@ -175,10 +181,7 @@ fn send_ctrl_v() -> Result<()> {
 
     let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
     if sent as usize != inputs.len() {
-        return Err(anyhow!(
-            "SendInput a envoye {sent}/{} events",
-            inputs.len()
-        ));
+        return Err(anyhow!("SendInput a envoye {sent}/{} events", inputs.len()));
     }
     debug!("Ctrl+V envoye via SendInput (scancode)");
     Ok(())

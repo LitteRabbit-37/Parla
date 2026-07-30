@@ -21,13 +21,12 @@
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
-use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use super::session::{
-    connect_ws, drain_ws_messages, i16_to_le_bytes, StreamingChannels, StreamingConfig,
-    StreamingEvent, StreamingProvider,
+    connect_streaming_socket, drain_ws_messages, i16_to_le_bytes, StreamingChannels,
+    StreamingConfig, StreamingEvent, StreamingMessage, StreamingProvider, StreamingSocketWrite,
 };
 
 pub struct AssemblyAiStreaming;
@@ -61,19 +60,20 @@ impl StreamingProvider for AssemblyAiStreaming {
             .map_err(|e| anyhow!("ws url parse: {e}"))?;
         req.headers_mut().insert(
             "Authorization",
-            api_key
-                .parse()
-                .map_err(|e| anyhow!("auth header: {e}"))?,
+            api_key.parse().map_err(|e| anyhow!("auth header: {e}"))?,
         );
 
-        let ws_stream = connect_ws(req).await?;
-        let (mut write, mut read) = ws_stream.split();
+        let socket = connect_streaming_socket(req).await?;
+        let super::session::StreamingSocket {
+            mut write,
+            mut read,
+        } = socket;
 
         // Handshake : on attend Begin (ou error fatal). Tout autre message
         // est ignore en attendant.
         loop {
-            match read.next().await {
-                Some(Ok(Message::Text(t))) => {
+            match read.next().await? {
+                Some(StreamingMessage::Text(t)) => {
                     let Ok(json) = serde_json::from_str::<Value>(&t) else {
                         continue;
                     };
@@ -84,8 +84,7 @@ impl StreamingProvider for AssemblyAiStreaming {
                         break;
                     }
                 }
-                Some(Ok(_)) => {}
-                Some(Err(e)) => return Err(anyhow!("ws read: {e}")),
+                Some(_) => {}
                 None => return Err(anyhow!("ws handshake closed prematurement")),
             }
         }
@@ -106,15 +105,13 @@ impl StreamingProvider for AssemblyAiStreaming {
                     while let Ok(chunk) = audio_rx.try_recv() {
                         pending.extend_from_slice(&i16_to_le_bytes(&chunk));
                     }
-                    let _ = flush_buffered_chunks(&mut write, &mut pending).await;
+                    let _ = flush_buffered_chunks(write.as_mut(), &mut pending).await;
                     if !pending.is_empty() {
                         let leftover: Vec<u8> = std::mem::take(&mut pending);
-                        let _ = write.send(Message::Binary(leftover.into())).await;
+                        let _ = write.send_binary(leftover).await;
                     }
-                    let _ = write
-                        .send(Message::Text(r#"{"type":"Terminate"}"#.into()))
-                        .await;
-                    drain_ws_messages(&mut read, std::time::Duration::from_secs(5), |t| {
+                    let _ = write.send_text(r#"{"type":"Terminate"}"#.to_string()).await;
+                    drain_ws_messages(read.as_mut(), std::time::Duration::from_secs(5), |t| {
                         handle_text(t, &mut state, &on_event);
                     })
                     .await;
@@ -125,19 +122,16 @@ impl StreamingProvider for AssemblyAiStreaming {
                     match chunk {
                         Some(c) => {
                             pending.extend_from_slice(&i16_to_le_bytes(&c));
-                            if let Err(e) = flush_buffered_chunks(&mut write, &mut pending).await {
-                                return Err(e);
-                            }
+                            flush_buffered_chunks(write.as_mut(), &mut pending).await?;
                         }
                         None => return Ok(state.final_text.trim().to_string()),
                     }
                 }
                 msg = read.next() => {
-                    match msg {
-                        Some(Ok(Message::Text(t))) => handle_text(&t, &mut state, &on_event),
-                        Some(Ok(Message::Close(_))) => return Ok(state.final_text.trim().to_string()),
-                        Some(Ok(_)) => {}
-                        Some(Err(e)) => return Err(anyhow!("ws read: {e}")),
+                    match msg? {
+                        Some(StreamingMessage::Text(t)) => handle_text(&t, &mut state, &on_event),
+                        Some(StreamingMessage::Close) => return Ok(state.final_text.trim().to_string()),
+                        Some(_) => {}
                         None => return Ok(state.final_text.trim().to_string()),
                     }
                 }
@@ -148,14 +142,14 @@ impl StreamingProvider for AssemblyAiStreaming {
 
 /// Envoie tous les chunks complets (>= MIN_CHUNK_BYTES) du buffer pending.
 /// Le residu (< MIN_CHUNK_BYTES) reste dans pending pour la prochaine fois.
-async fn flush_buffered_chunks<W>(write: &mut W, pending: &mut Vec<u8>) -> Result<()>
-where
-    W: SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
-{
+async fn flush_buffered_chunks(
+    write: &mut dyn StreamingSocketWrite,
+    pending: &mut Vec<u8>,
+) -> Result<()> {
     while pending.len() >= MIN_CHUNK_BYTES {
         let chunk: Vec<u8> = pending.drain(..MIN_CHUNK_BYTES).collect();
         write
-            .send(Message::Binary(chunk.into()))
+            .send_binary(chunk)
             .await
             .map_err(|e| anyhow!("ws send: {e}"))?;
     }
@@ -278,11 +272,7 @@ struct AaiState {
     last_committed_turn: Option<i64>,
 }
 
-fn handle_text(
-    t: &str,
-    state: &mut AaiState,
-    on_event: &(dyn Fn(StreamingEvent) + Send + Sync),
-) {
+fn handle_text(t: &str, state: &mut AaiState, on_event: &(dyn Fn(StreamingEvent) + Send + Sync)) {
     let Ok(json) = serde_json::from_str::<Value>(t) else {
         return;
     };
@@ -395,7 +385,10 @@ mod tests {
             cb.as_ref(),
         );
         let events = acc.lock().unwrap().clone();
-        assert!(matches!(events.first(), Some(StreamingEvent::Partial { .. })));
+        assert!(matches!(
+            events.first(),
+            Some(StreamingEvent::Partial { .. })
+        ));
         match events.last().unwrap() {
             StreamingEvent::Committed { text } => assert_eq!(text, "hello world"),
             other => panic!("expected Committed, got {:?}", other),

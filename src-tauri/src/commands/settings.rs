@@ -7,10 +7,152 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_store::StoreExt;
 
+use crate::services::proxy;
 use crate::text_processing::filler_words;
 use crate::transcription::pipeline;
 
 const STORE_FILE: &str = "parla.settings.json";
+const PROXY_SETTINGS_KEY: &str = "proxy_settings";
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProxySettings {
+    pub enabled: bool,
+    pub url: Option<String>,
+    #[serde(default)]
+    pub no_proxy_entries: Vec<String>,
+}
+#[tauri::command]
+pub fn get_proxy_settings(app: AppHandle) -> ProxySettings {
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|s| s.get(PROXY_SETTINGS_KEY))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default()
+}
+#[tauri::command]
+pub fn set_proxy_settings(app: AppHandle, settings: ProxySettings) -> Result<(), String> {
+    let mut settings = settings;
+    let embedded_credentials = settings
+        .url
+        .as_deref()
+        .filter(|u| !u.trim().is_empty())
+        .map(proxy::sanitize_proxy_url)
+        .transpose()?;
+    proxy::validate_settings(
+        settings.enabled,
+        embedded_credentials
+            .as_ref()
+            .map(|(url, _)| url.as_str())
+            .or(settings.url.as_deref()),
+        &settings.no_proxy_entries,
+    )?;
+    let credentials = embedded_credentials.as_ref().and_then(|(_, credentials)| {
+        credentials
+            .as_ref()
+            .map(|(username, password)| (username.clone(), password.clone()))
+    });
+    if let Some((url, _)) = embedded_credentials {
+        settings.url = Some(url);
+    }
+    let credential_identity = credentials
+        .as_ref()
+        .map(|_| proxy::proxy_identity(settings.url.as_deref().unwrap()))
+        .transpose()
+        .map_err(|e| e.to_string())?;
+    let store = app.store(STORE_FILE).map_err(|e| e.to_string())?;
+    let previous = store.get(PROXY_SETTINGS_KEY);
+    let previous_credentials = proxy::snapshot_credentials().map_err(|e| e.to_string())?;
+    store.set(
+        PROXY_SETTINGS_KEY,
+        serde_json::to_value(settings).map_err(|e| e.to_string())?,
+    );
+    if let Err(error) = store.save() {
+        match previous.as_ref() {
+            Some(value) => store.set(PROXY_SETTINGS_KEY, value.clone()),
+            None => {
+                store.delete(PROXY_SETTINGS_KEY);
+            }
+        }
+        let _ = store.save();
+        return Err(error.to_string());
+    }
+    if let Some((username, password)) = credentials {
+        let identity = credential_identity.expect("credential identity validated above");
+        if let Err(error) = proxy::set_credentials_for(&username, &password, &identity) {
+            match previous.as_ref() {
+                Some(value) => {
+                    store.set(PROXY_SETTINGS_KEY, value.clone());
+                }
+                None => {
+                    store.delete(PROXY_SETTINGS_KEY);
+                }
+            }
+            let _ = store.save();
+            return Err(error.to_string());
+        }
+    }
+    if let Err(error) = proxy::configure(&app) {
+        match previous {
+            Some(value) => {
+                store.set(PROXY_SETTINGS_KEY, value);
+            }
+            None => {
+                store.delete(PROXY_SETTINGS_KEY);
+            }
+        }
+        let _ = store.save();
+        let _ = proxy::restore_credentials(&previous_credentials);
+        let _ = proxy::configure(&app);
+        return Err(error.to_string());
+    }
+    Ok(())
+}
+#[tauri::command]
+pub fn set_proxy_credentials(
+    app: AppHandle,
+    username: String,
+    password: String,
+) -> Result<(), String> {
+    let settings = get_proxy_settings(app.clone());
+    let url = settings
+        .url
+        .as_deref()
+        .ok_or("proxy URL required for credentials")?;
+    let identity = proxy::proxy_identity(url).map_err(|e| e.to_string())?;
+    let previous_credentials = proxy::snapshot_credentials().map_err(|e| e.to_string())?;
+    proxy::set_credentials_for(&username, &password, &identity).map_err(|e| e.to_string())?;
+    if let Err(error) = proxy::configure(&app) {
+        let restore_error = proxy::restore_credentials(&previous_credentials).err();
+        let _ = proxy::configure(&app);
+        return Err(match restore_error {
+            Some(restore_error) => {
+                format!("{error}; could not restore credentials: {restore_error}")
+            }
+            None => error.to_string(),
+        });
+    }
+    Ok(())
+}
+#[tauri::command]
+pub fn delete_proxy_credentials(app: AppHandle) -> Result<(), String> {
+    let previous_credentials = proxy::snapshot_credentials().map_err(|e| e.to_string())?;
+    proxy::delete_credentials().map_err(|e| e.to_string())?;
+    if let Err(error) = proxy::configure(&app) {
+        let restore_error = proxy::restore_credentials(&previous_credentials).err();
+        let _ = proxy::configure(&app);
+        return Err(match restore_error {
+            Some(restore_error) => {
+                format!("{error}; could not restore credentials: {restore_error}")
+            }
+            None => error.to_string(),
+        });
+    }
+    Ok(())
+}
+#[tauri::command]
+pub fn has_proxy_credentials() -> bool {
+    proxy::has_credentials()
+}
 
 /// Emet un event Tauri "source:changed" avec la source actuelle.
 /// Appele chaque fois que la selection de source (kind / modele) change,
@@ -109,10 +251,7 @@ pub fn set_transcription_kind(app: AppHandle, kind: String) -> Result<(), String
 }
 
 #[tauri::command]
-pub fn set_transcription_source(
-    app: AppHandle,
-    source: TranscriptionSource,
-) -> Result<(), String> {
+pub fn set_transcription_source(app: AppHandle, source: TranscriptionSource) -> Result<(), String> {
     let store = app.store(STORE_FILE).map_err(|e| e.to_string())?;
     store.set(
         "transcription_source_kind",
@@ -155,10 +294,7 @@ pub fn get_text_processing_settings(app: AppHandle) -> TextProcessingSettings {
 #[tauri::command]
 pub fn set_text_formatting_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
     let store = app.store(STORE_FILE).map_err(|e| e.to_string())?;
-    store.set(
-        "text_formatting_enabled",
-        serde_json::Value::Bool(enabled),
-    );
+    store.set("text_formatting_enabled", serde_json::Value::Bool(enabled));
     store.save().map_err(|e| e.to_string())
 }
 
@@ -175,18 +311,12 @@ pub fn set_filler_words(app: AppHandle, words: Vec<String>) -> Result<(), String
 #[tauri::command]
 pub fn set_append_trailing_space(app: AppHandle, enabled: bool) -> Result<(), String> {
     let store = app.store(STORE_FILE).map_err(|e| e.to_string())?;
-    store.set(
-        "append_trailing_space",
-        serde_json::Value::Bool(enabled),
-    );
+    store.set("append_trailing_space", serde_json::Value::Bool(enabled));
     store.save().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn set_restore_clipboard_after_paste(
-    app: AppHandle,
-    enabled: bool,
-) -> Result<(), String> {
+pub fn set_restore_clipboard_after_paste(app: AppHandle, enabled: bool) -> Result<(), String> {
     let store = app.store(STORE_FILE).map_err(|e| e.to_string())?;
     store.set(
         "restore_clipboard_after_paste",

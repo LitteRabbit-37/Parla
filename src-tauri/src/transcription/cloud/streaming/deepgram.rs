@@ -15,13 +15,12 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
-use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use super::session::{
-    connect_ws, drain_ws_messages, i16_to_le_bytes, StreamingChannels, StreamingConfig,
-    StreamingEvent, StreamingProvider,
+    connect_streaming_socket, drain_ws_messages, i16_to_le_bytes, StreamingChannels,
+    StreamingConfig, StreamingEvent, StreamingMessage, StreamingProvider,
 };
 
 pub struct DeepgramStreaming;
@@ -57,8 +56,11 @@ impl StreamingProvider for DeepgramStreaming {
         req.headers_mut()
             .insert("Authorization", format!("Token {api_key}").parse()?);
 
-        let ws_stream = connect_ws(req).await?;
-        let (mut write, mut read) = ws_stream.split();
+        let socket = connect_streaming_socket(req).await?;
+        let super::session::StreamingSocket {
+            mut write,
+            mut read,
+        } = socket;
 
         on_event(StreamingEvent::SessionStarted);
 
@@ -77,31 +79,37 @@ impl StreamingProvider for DeepgramStreaming {
                 _ = &mut finalize_rx => {
                     // Drain tout audio restant avant de commit.
                     while let Ok(chunk) = audio_rx.try_recv() {
-                        let _ = write.send(Message::Binary(i16_to_le_bytes(&chunk).into())).await;
+                        let _ = write.send_binary(i16_to_le_bytes(&chunk)).await;
                     }
-                    let _ = write.send(Message::Text("{\"type\":\"Finalize\"}".into())).await;
+                    let _ = write.send_text("{\"type\":\"Finalize\"}".into()).await;
                     // On attend les derniers transcripts quelques secondes.
-                    let final_text = drain_remaining(&mut read, &mut accumulated_final, &on_event).await;
-                    let _ = write.send(Message::Text("{\"type\":\"CloseStream\"}".into())).await;
+                    drain_ws_messages(read.as_mut(), Duration::from_secs(5), |text| {
+                        handle_text(text, &mut accumulated_final, &on_event);
+                    }).await;
+                    let final_text = accumulated_final.trim().to_string();
+                    let _ = write.send_text("{\"type\":\"CloseStream\"}".into()).await;
                     let _ = write.close().await;
                     return Ok(final_text);
                 }
                 _ = keepalive.tick() => {
-                    let _ = write.send(Message::Text("{\"type\":\"KeepAlive\"}".into())).await;
+                    let _ = write.send_text("{\"type\":\"KeepAlive\"}".into()).await;
                 }
                 chunk = audio_rx.recv() => {
                     match chunk {
                         Some(c) => {
-                            if let Err(e) = write.send(Message::Binary(i16_to_le_bytes(&c).into())).await {
+                            if let Err(e) = write.send_binary(i16_to_le_bytes(&c)).await {
                                 on_event(StreamingEvent::Error { message: format!("ws send: {e}") });
                                 return Err(anyhow!("ws send: {e}"));
                             }
                         }
                         None => {
                             // Plus de chunks : on se comporte comme si finalize.
-                            let _ = write.send(Message::Text("{\"type\":\"Finalize\"}".into())).await;
-                            let final_text = drain_remaining(&mut read, &mut accumulated_final, &on_event).await;
-                            let _ = write.send(Message::Text("{\"type\":\"CloseStream\"}".into())).await;
+                            let _ = write.send_text("{\"type\":\"Finalize\"}".into()).await;
+                            drain_ws_messages(read.as_mut(), Duration::from_secs(5), |text| {
+                                handle_text(text, &mut accumulated_final, &on_event);
+                            }).await;
+                            let final_text = accumulated_final.trim().to_string();
+                            let _ = write.send_text("{\"type\":\"CloseStream\"}".into()).await;
                             let _ = write.close().await;
                             return Ok(final_text);
                         }
@@ -109,35 +117,18 @@ impl StreamingProvider for DeepgramStreaming {
                 }
                 msg = read.next() => {
                     match msg {
-                        Some(Ok(Message::Text(t))) => handle_text(&t, &mut accumulated_final, &on_event),
-                        Some(Ok(Message::Binary(_))) => {}
-                        Some(Ok(Message::Close(_))) => return Ok(accumulated_final),
-                        Some(Ok(_)) => {}
-                        Some(Err(e)) => {
+                        Ok(Some(StreamingMessage::Text(t))) => handle_text(&t, &mut accumulated_final, &on_event),
+                        Ok(Some(StreamingMessage::Binary(_))) => {}
+                        Ok(Some(StreamingMessage::Close)) | Ok(None) => return Ok(accumulated_final),
+                        Err(e) => {
                             on_event(StreamingEvent::Error { message: format!("ws read: {e}") });
                             return Err(anyhow!("ws read: {e}"));
                         }
-                        None => return Ok(accumulated_final),
                     }
                 }
             }
         }
     }
-}
-
-async fn drain_remaining<S>(
-    read: &mut S,
-    accumulated: &mut String,
-    on_event: &(dyn Fn(StreamingEvent) + Send + Sync),
-) -> String
-where
-    S: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
-{
-    drain_ws_messages(read, Duration::from_secs(5), |t| {
-        handle_text(t, accumulated, on_event)
-    })
-    .await;
-    accumulated.trim().to_string()
 }
 
 fn handle_text(
@@ -150,11 +141,10 @@ fn handle_text(
     };
 
     // Control / metadata : type == "Metadata" / "SpeechStarted" / "UtteranceEnd"
-    if let Some(kind) = json.get("type").and_then(|v| v.as_str()) {
-        match kind {
-            "Metadata" | "SpeechStarted" | "UtteranceEnd" => return,
-            _ => {}
-        }
+    if let Some("Metadata" | "SpeechStarted" | "UtteranceEnd") =
+        json.get("type").and_then(|v| v.as_str())
+    {
+        return;
     }
     if let Some(err) = json.get("error").and_then(|v| v.as_str()) {
         on_event(StreamingEvent::Error {

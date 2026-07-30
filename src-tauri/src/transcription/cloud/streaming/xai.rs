@@ -20,13 +20,12 @@
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use super::session::{
-    connect_ws, drain_ws_messages, i16_to_le_bytes, StreamingChannels, StreamingConfig,
-    StreamingEvent, StreamingProvider,
+    connect_streaming_socket, drain_ws_messages, i16_to_le_bytes, StreamingChannels,
+    StreamingConfig, StreamingEvent, StreamingMessage, StreamingProvider,
 };
 
 pub struct XaiStreaming;
@@ -64,12 +63,15 @@ impl StreamingProvider for XaiStreaming {
                 .map_err(|e| anyhow!("auth header: {e}"))?,
         );
 
-        let ws_stream = connect_ws(req).await?;
-        let (mut write, mut read) = ws_stream.split();
+        let socket = connect_streaming_socket(req).await?;
+        let super::session::StreamingSocket {
+            mut write,
+            mut read,
+        } = socket;
 
         // Handshake : on attend `transcript.created` (ou error fatal).
         match read.next().await {
-            Some(Ok(Message::Text(t))) => {
+            Ok(Some(StreamingMessage::Text(t))) => {
                 if let Ok(json) = serde_json::from_str::<Value>(&t) {
                     match json.get("type").and_then(|v| v.as_str()) {
                         Some("error") => {
@@ -85,9 +87,9 @@ impl StreamingProvider for XaiStreaming {
                     }
                 }
             }
-            Some(Ok(_)) => {}
-            Some(Err(e)) => return Err(anyhow!("ws read: {e}")),
-            None => return Err(anyhow!("ws handshake closed prematurement")),
+            Ok(Some(_)) => {}
+            Err(e) => return Err(anyhow!("ws read: {e}")),
+            Ok(None) => return Err(anyhow!("ws handshake closed prematurement")),
         }
         on_event(StreamingEvent::SessionStarted);
 
@@ -103,17 +105,14 @@ impl StreamingProvider for XaiStreaming {
                 biased;
                 _ = &mut finalize_rx => {
                     while let Ok(chunk) = audio_rx.try_recv() {
-                        let _ = write.send(Message::Binary(i16_to_le_bytes(&chunk).into())).await;
+                        let _ = write.send_binary(i16_to_le_bytes(&chunk)).await;
                     }
                     let _ = write
-                        .send(Message::Text(
-                            json!({ "type": "audio.done" }).to_string().into(),
-                        ))
+                        .send_text(json!({ "type": "audio.done" }).to_string())
                         .await;
-                    drain_ws_messages(&mut read, std::time::Duration::from_secs(5), |t| {
-                        handle_text(t, &mut state, &on_event);
-                    })
-                    .await;
+                    drain_ws_messages(read.as_mut(), std::time::Duration::from_secs(5), |text| {
+                        handle_text(text, &mut state, &on_event)
+                    }).await;
                     let _ = write.close().await;
                     return Ok(state.final_text.trim().to_string());
                 }
@@ -121,7 +120,7 @@ impl StreamingProvider for XaiStreaming {
                     match chunk {
                         Some(c) => {
                             if let Err(e) = write
-                                .send(Message::Binary(i16_to_le_bytes(&c).into()))
+                                .send_binary(i16_to_le_bytes(&c))
                                 .await
                             {
                                 return Err(anyhow!("ws send: {e}"));
@@ -132,11 +131,11 @@ impl StreamingProvider for XaiStreaming {
                 }
                 msg = read.next() => {
                     match msg {
-                        Some(Ok(Message::Text(t))) => handle_text(&t, &mut state, &on_event),
-                        Some(Ok(Message::Close(_))) => return Ok(state.final_text.trim().to_string()),
-                        Some(Ok(_)) => {}
-                        Some(Err(e)) => return Err(anyhow!("ws read: {e}")),
-                        None => return Ok(state.final_text.trim().to_string()),
+                        Ok(Some(StreamingMessage::Text(t))) => handle_text(&t, &mut state, &on_event),
+                        Ok(Some(StreamingMessage::Close)) => return Ok(state.final_text.trim().to_string()),
+                        Ok(Some(StreamingMessage::Binary(_))) => {}
+                        Err(e) => return Err(anyhow!("ws read: {e}")),
+                        Ok(None) => return Ok(state.final_text.trim().to_string()),
                     }
                 }
             }
@@ -153,11 +152,7 @@ struct XaiState {
     locked: String,
 }
 
-fn handle_text(
-    t: &str,
-    state: &mut XaiState,
-    on_event: &(dyn Fn(StreamingEvent) + Send + Sync),
-) {
+fn handle_text(t: &str, state: &mut XaiState, on_event: &(dyn Fn(StreamingEvent) + Send + Sync)) {
     let Ok(json) = serde_json::from_str::<Value>(t) else {
         return;
     };

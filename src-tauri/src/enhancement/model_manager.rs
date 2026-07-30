@@ -12,11 +12,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use futures_util::StreamExt;
 use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::io::AsyncWriteExt;
 use tracing::info;
 
 /// Entree du catalogue GGUF.
@@ -252,7 +250,10 @@ impl GgufModelManager {
             if flags.contains_key(id) {
                 return Err(anyhow!("telechargement deja en cours: {id}"));
             }
-            flags.insert(id.to_string(), Arc::new(std::sync::atomic::AtomicBool::new(false)));
+            flags.insert(
+                id.to_string(),
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            );
         }
         let result = self.download_impl(id).await;
         self.cancel_flags.lock().remove(id);
@@ -261,7 +262,7 @@ impl GgufModelManager {
                 "llm_model:download:error",
                 DownloadError {
                     id: id.to_string(),
-                    message: e.to_string(),
+                    message: crate::services::download::diagnostic(e),
                 },
             );
         }
@@ -281,63 +282,26 @@ impl GgufModelManager {
             .cloned()
             .ok_or_else(|| anyhow!("cancel flag missing for {id}"))?;
 
-        let tmp = target.with_extension("gguf.part");
-        let _ = fs::remove_file(&tmp);
-
-        let client = reqwest::Client::new();
-        let resp = client
-            .get(m.url)
-            .send()
-            .await
-            .with_context(|| format!("GET {}", m.url))?;
-        if !resp.status().is_success() {
-            anyhow::bail!("HTTP {} depuis {}", resp.status(), m.url);
-        }
-        let total = resp.content_length().unwrap_or(m.size_bytes);
-
-        let mut file = tokio::fs::File::create(&tmp)
-            .await
-            .with_context(|| format!("create {}", tmp.display()))?;
-        let mut stream = resp.bytes_stream();
-        let mut downloaded: u64 = 0;
-        let mut last_emit = std::time::Instant::now();
-
-        while let Some(chunk) = stream.next().await {
-            if cancel.load(std::sync::atomic::Ordering::SeqCst) {
-                drop(file);
-                let _ = fs::remove_file(&tmp);
-                return Err(anyhow!("telechargement annule"));
-            }
-            let bytes = chunk.context("chunk recv")?;
-            file.write_all(&bytes).await?;
-            downloaded += bytes.len() as u64;
-
-            if last_emit.elapsed() >= std::time::Duration::from_millis(50) {
-                let _ = self.app.emit(
+        let url = url::Url::parse(m.url)?;
+        let app = self.app.clone();
+        let id_owned = id.to_owned();
+        crate::services::download::download_to_file(
+            &url,
+            &target,
+            m.size_bytes,
+            Some(cancel),
+            move |downloaded, total| {
+                let _ = app.emit(
                     "llm_model:download:progress",
                     DownloadProgress {
-                        id: id.to_string(),
+                        id: id_owned.clone(),
                         downloaded,
                         total,
                     },
                 );
-                last_emit = std::time::Instant::now();
-            }
-        }
-        file.flush().await?;
-        drop(file);
-
-        let _ = self.app.emit(
-            "llm_model:download:progress",
-            DownloadProgress {
-                id: id.to_string(),
-                downloaded,
-                total,
             },
-        );
-
-        fs::rename(&tmp, &target)
-            .with_context(|| format!("rename {} -> {}", tmp.display(), target.display()))?;
+        )
+        .await?;
 
         let _ = self.app.emit(
             "llm_model:download:complete",

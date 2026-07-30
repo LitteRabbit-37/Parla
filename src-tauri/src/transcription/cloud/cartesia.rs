@@ -11,7 +11,7 @@ use std::path::Path;
 use anyhow::Result;
 use async_trait::async_trait;
 
-use super::http::{batch_client, map_http_err};
+use super::http::{http_status_error, BatchHttpClient, HttpRequest};
 use super::provider::{CloudTranscriptionProvider, TranscribeRequest};
 
 pub struct CartesiaProvider;
@@ -25,16 +25,13 @@ impl CloudTranscriptionProvider for CartesiaProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client()?;
-        let resp = client
-            .get("https://api.cartesia.ai/voices?limit=1")
+        let client = BatchHttpClient::new("https://api.cartesia.ai/voices?limit=1")?;
+        let request = HttpRequest::new("GET", "https://api.cartesia.ai/voices?limit=1")
             .header("X-API-Key", api_key)
-            .header("Cartesia-Version", CARTESIA_VERSION)
-            .send()
-            .await
-            .map_err(map_http_err)?;
-        if !resp.status().is_success() {
-            anyhow::bail!("HTTP {} (cle API invalide ?)", resp.status());
+            .header("Cartesia-Version", CARTESIA_VERSION);
+        let response = client.send(request.clone()).await?;
+        if !(200..300).contains(&response.status) {
+            return Err(http_status_error(response.status, &response.body, &request));
         }
         Ok(())
     }

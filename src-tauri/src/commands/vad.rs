@@ -1,7 +1,7 @@
 // Commandes Tauri pour le modele VAD Silero (download/delete/state/enable).
 
 use serde_json::Value;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_store::StoreExt;
 
 use crate::transcription::vad::{self, VadEngine, VadModelState};
@@ -24,10 +24,17 @@ pub fn vad_get_state(app: AppHandle) -> VadModelState {
 
 #[tauri::command]
 pub async fn vad_download(app: AppHandle) -> Result<String, String> {
-    vad::download_vad(&app)
-        .await
-        .map(|p| p.to_string_lossy().into_owned())
-        .map_err(|e| e.to_string())
+    match vad::download_vad(&app).await {
+        Ok(path) => Ok(path.to_string_lossy().into_owned()),
+        Err(error) => {
+            let message = crate::services::download::diagnostic(&error);
+            let _ = app.emit(
+                "vad:download:error",
+                serde_json::json!({ "message": message }),
+            );
+            Err(message)
+        }
+    }
 }
 
 #[tauri::command]

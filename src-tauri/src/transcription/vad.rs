@@ -16,12 +16,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::{anyhow, Context, Result};
-use futures_util::StreamExt;
+use anyhow::{anyhow, Result};
 use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::io::AsyncWriteExt;
 use tracing::{debug, info, warn};
 use whisper_rs::{WhisperVadContext, WhisperVadContextParams, WhisperVadParams, WhisperVadSegment};
 
@@ -166,42 +164,17 @@ pub async fn download_vad(app: &AppHandle) -> Result<PathBuf> {
     if target.exists() {
         return Ok(target);
     }
-    let tmp = target.with_extension("bin.part");
-    let _ = fs::remove_file(&tmp);
-
-    let client = reqwest::Client::new();
-    let resp = client
-        .get(VAD_MODEL_URL)
-        .send()
-        .await
-        .with_context(|| format!("GET {VAD_MODEL_URL}"))?;
-    if !resp.status().is_success() {
-        anyhow::bail!("HTTP {} depuis {}", resp.status(), VAD_MODEL_URL);
-    }
-    let total = resp.content_length().unwrap_or(VAD_MODEL_SIZE_BYTES);
-
-    let mut file = tokio::fs::File::create(&tmp)
-        .await
-        .with_context(|| format!("create {}", tmp.display()))?;
-    let mut stream = resp.bytes_stream();
-    let mut downloaded: u64 = 0;
-    let mut last_emit = std::time::Instant::now();
-
-    while let Some(chunk) = stream.next().await {
-        let bytes = chunk.context("chunk")?;
-        file.write_all(&bytes).await?;
-        downloaded += bytes.len() as u64;
-        if last_emit.elapsed() >= std::time::Duration::from_millis(100) {
+    let url = url::Url::parse(VAD_MODEL_URL)?;
+    crate::services::download::download_to_file(&url, &target, VAD_MODEL_SIZE_BYTES, None, {
+        let app = app.clone();
+        move |downloaded, total| {
             let _ = app.emit(
                 "vad:download:progress",
                 VadDownloadProgress { downloaded, total },
             );
-            last_emit = std::time::Instant::now();
         }
-    }
-    file.flush().await?;
-    drop(file);
-    fs::rename(&tmp, &target)?;
+    })
+    .await?;
 
     let _ = app.emit(
         "vad:download:complete",
@@ -225,21 +198,20 @@ fn num_cpus_physical() -> i32 {
         .unwrap_or(4)
 }
 
+type VadResult = Result<(Vec<f32>, Vec<(usize, usize)>)>;
+
 /// Applique la VAD sur un WAV 16 kHz mono et retourne les plages de samples
 /// (start, end) a transcrire. Ces plages ont deja subi le padding de
 /// `speech_pad_ms` en interne par whisper.cpp.
-pub fn run_vad_on_wav(
-    engine: &VadEngine,
-    wav_path: &Path,
-) -> Result<(Vec<f32>, Vec<(usize, usize)>)> {
+pub fn run_vad_on_wav(engine: &VadEngine, wav_path: &Path) -> VadResult {
     let samples = super::whisper::read_wav_as_f32(wav_path)?;
     let segs = engine.segments(&samples)?;
     // Les segments de whisper.cpp sont en centisecondes cote start/end.
     let ranges: Vec<(usize, usize)> = segs
         .into_iter()
         .map(|WhisperVadSegment { start, end }| {
-            let start_sample = ((start as f32 / 100.0) * 16_000.0) as usize;
-            let end_sample = ((end as f32 / 100.0) * 16_000.0) as usize;
+            let start_sample = ((start / 100.0) * 16_000.0) as usize;
+            let end_sample = ((end / 100.0) * 16_000.0) as usize;
             (
                 start_sample.min(samples.len()),
                 end_sample.min(samples.len()),

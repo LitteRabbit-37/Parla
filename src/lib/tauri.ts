@@ -256,6 +256,18 @@ export type RetentionSettings = {
   audio_retention_days: number;
 };
 
+/** Non-secret Application Proxy configuration. Credentials are never returned here. */
+export type ProxySettings = {
+  enabled: boolean;
+  url: string | null;
+  no_proxy_entries: string[];
+};
+
+export type ProxyCredentials = {
+  username: string;
+  password: string;
+};
+
 // Aligne sur le snake_case de heck que serde utilise cote Rust : Last7Days
 // devient last7_days (pas last_7_days), car heck ne separe pas les chiffres
 // adjacents aux lettres. Tester avec ces valeurs exactes ou la deserialisation
@@ -551,6 +563,14 @@ export const api = {
   setRetentionSettings: (settings: RetentionSettings) =>
     invoke<void>("set_retention_settings", { settings }),
   runHistoryCleanup: () => invoke<void>("run_history_cleanup"),
+
+  getProxySettings: () => invoke<ProxySettings>("get_proxy_settings"),
+  setProxySettings: (settings: ProxySettings) =>
+    invoke<void>("set_proxy_settings", { settings }),
+  setProxyCredentials: (credentials: ProxyCredentials) =>
+    invoke<void>("set_proxy_credentials", credentials),
+  deleteProxyCredentials: () => invoke<void>("delete_proxy_credentials"),
+  hasProxyCredentials: () => invoke<boolean>("has_proxy_credentials"),
 
   checkPermissions: () => invoke<PermissionStatus>("check_permissions"),
   setAutostartEnabled: (enabled: boolean) =>

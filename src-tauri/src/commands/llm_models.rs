@@ -32,7 +32,7 @@ pub async fn download_gguf_model(app: AppHandle, id: String) -> Result<String, S
     mgr.download(&id)
         .await
         .map(|p| p.to_string_lossy().into_owned())
-        .map_err(|e| e.to_string())
+        .map_err(|e| crate::services::download::diagnostic(&e))
 }
 
 #[command]
@@ -65,7 +65,10 @@ pub async fn import_gguf_model(app: AppHandle) -> Result<String, String> {
     let Some(fp) = file else {
         return Err("Import annule".into());
     };
-    let p: PathBuf = fp.as_path().map(|p| p.to_path_buf()).ok_or_else(|| "chemin invalide".to_string())?;
+    let p: PathBuf = fp
+        .as_path()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| "chemin invalide".to_string())?;
     let mgr = ensure_state(&app);
     mgr.import(&p).map_err(|e| e.to_string())
 }

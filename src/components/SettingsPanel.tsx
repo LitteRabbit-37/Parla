@@ -16,6 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { HotkeyCard } from "@/components/HotkeyCard";
+import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
 import {
   LANGUAGE_LABELS,
@@ -33,7 +34,6 @@ export function SettingsPanel() {
   const [systemMute, setSystemMute] = useState(false);
   const [resumeDelay, setResumeDelay] = useState(0.2);
   const [soundFeedback, setSoundFeedback] = useState(true);
-
   useEffect(() => {
     api
       .getRecorderStyle()
@@ -294,7 +294,108 @@ export function SettingsPanel() {
           </div>
         </CardContent>
       </Card>
+
     </div>
+  );
+}
+
+export function ApplicationProxyCard() {
+  const [proxy, setProxy] = useState({ enabled: false, url: "", noProxyEntries: "" });
+  const [proxyCredentials, setProxyCredentials] = useState({ username: "", password: "" });
+  const [hasProxyCredentials, setHasProxyCredentials] = useState(false);
+  const [proxyLoading, setProxyLoading] = useState(true);
+  const [proxySaving, setProxySaving] = useState(false);
+  const [credentialsSaving, setCredentialsSaving] = useState(false);
+  const [proxyError, setProxyError] = useState<string | null>(null);
+  const [proxyNotice, setProxyNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    Promise.all([api.getProxySettings(), api.hasProxyCredentials()])
+      .then(([settings, credentials]) => {
+        setProxy({ enabled: settings.enabled, url: settings.url ?? "", noProxyEntries: settings.no_proxy_entries.join(", ") });
+        setHasProxyCredentials(credentials);
+      })
+      .catch(() => setProxyError("Could not load Application Proxy settings."))
+      .finally(() => setProxyLoading(false));
+  }, []);
+
+  function validateProxy(): string | null {
+    const url = proxy.url.trim();
+    if (!proxy.enabled || url.length === 0) return null;
+    try {
+      const parsed = new URL(url);
+      if (!["http:", "https:", "socks5:"].includes(parsed.protocol)) return "Application Proxy URL must use http, https, or socks5.";
+      if (!parsed.hostname) return "Enter a valid Application Proxy URL.";
+      if (parsed.username || parsed.password) return "Enter Application Proxy credentials in credential fields, not in URL.";
+    } catch {
+      return "Enter a valid Application Proxy URL.";
+    }
+    return null;
+  }
+
+  function normalizedNoProxyEntries(): string[] {
+    return proxy.noProxyEntries.split(",").map((entry) => entry.trim()).filter(Boolean);
+  }
+
+  async function saveProxy() {
+    setProxyError(null);
+    setProxyNotice(null);
+    const validationError = validateProxy();
+    if (validationError) { setProxyError(validationError); return; }
+    setProxySaving(true);
+    try {
+      await api.setProxySettings({ enabled: proxy.enabled, url: proxy.url.trim() || null, no_proxy_entries: normalizedNoProxyEntries() });
+      setProxy({ ...proxy, noProxyEntries: normalizedNoProxyEntries().join(", ") });
+      setProxyNotice("Application Proxy settings saved.");
+    } catch { setProxyError("Could not save Application Proxy settings."); }
+    finally { setProxySaving(false); }
+  }
+
+  async function saveProxyCredentials() {
+    setProxyError(null);
+    setProxyNotice(null);
+    if (!proxyCredentials.username.trim() || !proxyCredentials.password) { setProxyError("Enter both username and password to save credentials."); return; }
+    setCredentialsSaving(true);
+    try {
+      await api.setProxyCredentials({ username: proxyCredentials.username.trim(), password: proxyCredentials.password });
+      setProxyCredentials({ username: "", password: "" });
+      setHasProxyCredentials(true);
+      setProxyNotice("Application Proxy credentials saved securely.");
+    } catch { setProxyError("Could not save Application Proxy credentials."); }
+    finally { setCredentialsSaving(false); }
+  }
+
+  async function removeProxyCredentials() {
+    setProxyError(null);
+    setProxyNotice(null);
+    try {
+      await api.deleteProxyCredentials();
+      setHasProxyCredentials(false);
+      setProxyNotice("Application Proxy credentials removed.");
+    } catch { setProxyError("Could not remove Application Proxy credentials."); }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Application Proxy</CardTitle>
+        <CardDescription>
+          Choose how Parla routes outbound HTTP(S) traffic: turn this off for Direct connections; turn it on with no URL for System proxy settings, including WPAD and integrated authentication; or enter a URL for an Explicit proxy.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {proxyLoading ? <p className="text-sm text-muted-foreground">Loading Application Proxy settings…</p> : (
+          <>
+            <label className="flex items-center justify-between rounded-md border p-3"><div><p className="text-sm font-medium">Enable Application Proxy</p><p className="text-xs text-muted-foreground">Off: Direct connections. On: use System settings when URL is blank, or an Explicit proxy when URL is entered.</p></div><input type="checkbox" checked={proxy.enabled} onChange={(event) => setProxy({ ...proxy, enabled: event.target.checked })} className="h-5 w-5" /></label>
+            <div className={cn("space-y-1", !proxy.enabled && "opacity-60")}><label htmlFor="application-proxy-url" className="text-sm font-medium">Application Proxy URL</label><input id="application-proxy-url" type="url" value={proxy.url} onChange={(event) => setProxy({ ...proxy, url: event.target.value })} placeholder="https://proxy.example:8080" disabled={!proxy.enabled} className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" /><p className="text-xs text-muted-foreground">Leave blank for System proxy settings, including WPAD and integrated authentication. Enter an http, https, or socks5 URL for an Explicit proxy.</p></div>
+            <div className={cn("space-y-1", !proxy.enabled && "opacity-60")}><label htmlFor="no-proxy-entries" className="text-sm font-medium">No-Proxy Entries</label><textarea id="no-proxy-entries" value={proxy.noProxyEntries} onChange={(event) => setProxy({ ...proxy, noProxyEntries: event.target.value })} placeholder="localhost, 127.0.0.1, .example.com, 10.0.0.0/8" disabled={!proxy.enabled} rows={3} className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm" /><p className="text-xs text-muted-foreground">Comma-separated NO_PROXY-compatible patterns. Matching destinations bypass Application Proxy; in System mode, Windows settings control bypass behavior.</p></div>
+            <div className="rounded-md border p-3"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-medium">Application Proxy credentials</p><p className="text-xs text-muted-foreground">{hasProxyCredentials ? "Credentials saved in the operating-system credential vault." : "No credentials saved."}</p></div>{hasProxyCredentials && <Button type="button" variant="outline" size="sm" onClick={removeProxyCredentials}>Remove credentials</Button>}</div><div className="mt-3 grid gap-2 sm:grid-cols-2"><input aria-label="Application Proxy username" value={proxyCredentials.username} onChange={(event) => setProxyCredentials({ ...proxyCredentials, username: event.target.value })} placeholder="Username" autoComplete="username" className="h-9 rounded-md border border-input bg-background px-3 text-sm" /><input aria-label="Application Proxy password" type="password" value={proxyCredentials.password} onChange={(event) => setProxyCredentials({ ...proxyCredentials, password: event.target.value })} placeholder="Password" autoComplete="new-password" className="h-9 rounded-md border border-input bg-background px-3 text-sm" /></div><Button type="button" variant="outline" size="sm" className="mt-3" onClick={saveProxyCredentials} disabled={credentialsSaving}>{credentialsSaving ? "Saving…" : "Save credentials"}</Button></div>
+            {(proxyError || proxyNotice) && <p role="status" className={cn("text-sm", proxyError ? "text-destructive" : "text-muted-foreground")}>{proxyError ?? proxyNotice}</p>}
+            <Button type="button" onClick={saveProxy} disabled={proxySaving}>{proxySaving ? "Saving…" : "Save Application Proxy settings"}</Button>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

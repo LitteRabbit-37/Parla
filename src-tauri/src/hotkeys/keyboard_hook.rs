@@ -37,8 +37,8 @@ use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage,
-    UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP,
-    WM_SYSKEYDOWN, WM_SYSKEYUP,
+    UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN,
+    WM_SYSKEYUP,
 };
 
 /// Touches modifier surveillees individuellement (legacy enum, conserve pour
@@ -76,11 +76,14 @@ impl HotkeyOption {
 /// Definition d'un trigger pour un slot (primary ou secondary). Sert a
 /// representer les trois cas user : pas de trigger, modifier-only, ou
 /// combo libre.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum HotkeyTrigger {
+    #[default]
     None,
-    Modifier { option: HotkeyOption },
+    Modifier {
+        option: HotkeyOption,
+    },
     Combo {
         vk: u32,
         ctrl: bool,
@@ -88,12 +91,6 @@ pub enum HotkeyTrigger {
         shift: bool,
         win: bool,
     },
-}
-
-impl Default for HotkeyTrigger {
-    fn default() -> Self {
-        HotkeyTrigger::None
-    }
 }
 
 impl HotkeyTrigger {
@@ -157,7 +154,7 @@ pub fn set_power_shortcut_count(n: usize) {
 fn power_mode_digit_index(vk: u32) -> Option<usize> {
     match vk {
         0x31..=0x39 => Some((vk - 0x31) as usize), // '1'..'9' -> 0..8
-        0x30 => Some(9),                            // '0' -> 10e profil
+        0x30 => Some(9),                           // '0' -> 10e profil
         _ => None,
     }
 }
@@ -296,11 +293,7 @@ fn run_hook_thread(
 }
 
 #[cfg(windows)]
-unsafe extern "system" fn low_level_proc(
-    n_code: i32,
-    w_param: WPARAM,
-    l_param: LPARAM,
-) -> LRESULT {
+unsafe extern "system" fn low_level_proc(n_code: i32, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
     if n_code >= 0 {
         let info = &*(l_param.0 as *const KBDLLHOOKSTRUCT);
         let vk = info.vkCode;
@@ -541,7 +534,7 @@ mod tests {
         // Pave numerique (0x60-0x69) ignore pour ne pas capter les Alt-codes.
         assert_eq!(power_mode_digit_index(0x60), None); // Numpad 0
         assert_eq!(power_mode_digit_index(0x69), None); // Numpad 9
-        // Lettres et autres VK non concernes.
+                                                        // Lettres et autres VK non concernes.
         assert_eq!(power_mode_digit_index(0x41), None); // 'A'
         assert_eq!(power_mode_digit_index(0x1B), None); // Escape
     }

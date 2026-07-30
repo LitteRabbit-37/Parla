@@ -22,8 +22,8 @@ pub fn validate_endpoint(url: &str, allow_plain_http_loopback: bool) -> Result<S
         return Err(anyhow!("URL vide"));
     }
 
-    let parsed = reqwest::Url::parse(trimmed)
-        .map_err(|e| anyhow!("URL invalide '{trimmed}': {e}"))?;
+    let parsed =
+        reqwest::Url::parse(trimmed).map_err(|e| anyhow!("URL invalide '{trimmed}': {e}"))?;
 
     let scheme = parsed.scheme();
     let host = parsed
@@ -56,8 +56,7 @@ pub fn validate_endpoint(url: &str, allow_plain_http_loopback: bool) -> Result<S
 }
 
 fn is_loopback(host: &str) -> bool {
-    matches!(host, "localhost" | "127.0.0.1" | "::1")
-        || host.starts_with("127.")
+    matches!(host, "localhost" | "127.0.0.1" | "::1") || host.starts_with("127.")
 }
 
 #[cfg(test)]

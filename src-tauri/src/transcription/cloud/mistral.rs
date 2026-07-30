@@ -10,10 +10,9 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use reqwest::multipart::Form;
 use serde::Deserialize;
 
-use super::http::{batch_client, map_http_err, wav_part_from_path};
+use super::http::{http_status_error, BatchHttpClient, HttpRequest, MultipartEncoder};
 use super::provider::{CloudTranscriptionProvider, TranscribeRequest};
 
 pub struct MistralProvider;
@@ -30,15 +29,13 @@ impl CloudTranscriptionProvider for MistralProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client()?;
-        let resp = client
-            .get("https://api.mistral.ai/v1/models")
-            .bearer_auth(api_key)
-            .send()
-            .await
-            .map_err(map_http_err)?;
-        if !resp.status().is_success() {
-            anyhow::bail!("HTTP {}", resp.status());
+        let url = "https://api.mistral.ai/v1/models";
+        let client = BatchHttpClient::new(url)?;
+        let request =
+            HttpRequest::new("GET", url).header("Authorization", format!("Bearer {api_key}"));
+        let response = client.send(request.clone()).await?;
+        if !(200..300).contains(&response.status) {
+            return Err(http_status_error(response.status, &response.body, &request));
         }
         Ok(())
     }
@@ -49,25 +46,30 @@ impl CloudTranscriptionProvider for MistralProvider {
         api_key: &str,
         request: &TranscribeRequest,
     ) -> Result<String> {
-        let form = Form::new()
-            .text("model", request.model.clone())
-            .part("file", wav_part_from_path(wav_path).await?);
+        let audio = tokio::fs::read(wav_path).await?;
+        let filename = wav_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("audio.wav");
+        let form = MultipartEncoder::random()
+            .field("model", request.model.clone())
+            .file("file", filename, "audio/wav", audio);
 
-        let client = batch_client()?;
-        let resp = client
-            .post("https://api.mistral.ai/v1/audio/transcriptions")
+        let url = "https://api.mistral.ai/v1/audio/transcriptions";
+        let client = BatchHttpClient::new(url)?;
+        let http_request = HttpRequest::new("POST", url)
             .header("x-api-key", api_key)
-            .multipart(form)
-            .send()
-            .await
-            .map_err(map_http_err)?;
-
-        let status = resp.status();
-        let body = resp.bytes().await?;
-        if !status.is_success() {
-            anyhow::bail!("HTTP {status}: {}", String::from_utf8_lossy(&body));
+            .header("Content-Type", form.content_type())
+            .body(form.try_encode()?);
+        let response = client.send(http_request.clone()).await?;
+        if !(200..300).contains(&response.status) {
+            return Err(http_status_error(
+                response.status,
+                &response.body,
+                &http_request,
+            ));
         }
-        let parsed: MistralResponse = serde_json::from_slice(&body)
+        let parsed: MistralResponse = serde_json::from_slice(&response.body)
             .map_err(|e| anyhow!("parse JSON Mistral: {e}"))?;
         Ok(parsed.text)
     }

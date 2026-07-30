@@ -12,75 +12,64 @@ use super::super::model::WHISPER_FULL_LANGS;
 
 /// Deepgram Nova 3 : ~50 langues + auto. Source DeepgramProvider.swift.
 const DEEPGRAM_LANGS: &[&str] = &[
-    "auto", "ar", "be", "bg", "bn", "bs", "ca", "cs", "da", "de", "el", "en",
-    "es", "et", "fa", "fi", "fr", "he", "hi", "hr", "hu", "id", "it", "ja",
-    "kn", "ko", "lt", "lv", "mk", "mr", "ms", "nl", "no", "pl", "pt", "ro",
-    "ru", "sk", "sl", "sr", "sv", "ta", "te", "th", "tl", "tr", "uk", "ur",
-    "vi", "zh",
+    "auto", "ar", "be", "bg", "bn", "bs", "ca", "cs", "da", "de", "el", "en", "es", "et", "fa",
+    "fi", "fr", "he", "hi", "hr", "hu", "id", "it", "ja", "kn", "ko", "lt", "lv", "mk", "mr", "ms",
+    "nl", "no", "pl", "pt", "ro", "ru", "sk", "sl", "sr", "sv", "ta", "te", "th", "tl", "tr", "uk",
+    "ur", "vi", "zh",
 ];
 
 /// ElevenLabs Scribe : 99 langues + auto. Source ElevenLabsProvider.swift.
 const ELEVENLABS_LANGS: &[&str] = &[
-    "auto", "af", "am", "ar", "as", "az", "be", "bg", "bn", "bs", "ca", "cs",
-    "cy", "da", "de", "el", "en", "es", "et", "eu", "fa", "fi", "fil", "fr",
-    "ga", "gl", "gu", "ha", "he", "hi", "hr", "hu", "hy", "id", "ig", "is",
-    "it", "ja", "jw", "ka", "kk", "km", "kn", "ko", "ku", "ky", "lb", "ln",
-    "lo", "lt", "lv", "mi", "mk", "ml", "mn", "mr", "ms", "mt", "my", "ne",
-    "nl", "no", "or", "pa", "pl", "ps", "pt", "ro", "ru", "sd", "sk", "sl",
-    "sn", "so", "sr", "sv", "sw", "ta", "tg", "te", "th", "tr", "uk", "ur",
-    "uz", "vi", "wo", "xh", "yo", "yue", "zh", "zu",
+    "auto", "af", "am", "ar", "as", "az", "be", "bg", "bn", "bs", "ca", "cs", "cy", "da", "de",
+    "el", "en", "es", "et", "eu", "fa", "fi", "fil", "fr", "ga", "gl", "gu", "ha", "he", "hi",
+    "hr", "hu", "hy", "id", "ig", "is", "it", "ja", "jw", "ka", "kk", "km", "kn", "ko", "ku", "ky",
+    "lb", "ln", "lo", "lt", "lv", "mi", "mk", "ml", "mn", "mr", "ms", "mt", "my", "ne", "nl", "no",
+    "or", "pa", "pl", "ps", "pt", "ro", "ru", "sd", "sk", "sl", "sn", "so", "sr", "sv", "sw", "ta",
+    "tg", "te", "th", "tr", "uk", "ur", "uz", "vi", "wo", "xh", "yo", "yue", "zh", "zu",
 ];
 
 /// Mistral Voxtral : 13 langues + auto. Source MistralProvider.swift.
 const MISTRAL_LANGS: &[&str] = &[
-    "auto", "ar", "de", "en", "es", "fr", "hi", "it", "ja", "ko", "nl", "pt",
-    "ru", "zh",
+    "auto", "ar", "de", "en", "es", "fr", "hi", "it", "ja", "ko", "nl", "pt", "ru", "zh",
 ];
 
 /// Soniox V4 : 60 langues + auto. Source SonioxProvider.swift.
 const SONIOX_LANGS: &[&str] = &[
-    "auto", "af", "sq", "ar", "az", "eu", "be", "bn", "bs", "bg", "ca", "zh",
-    "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "gl", "de", "el", "gu",
-    "he", "hi", "hu", "id", "it", "ja", "kn", "kk", "ko", "lv", "lt", "mk",
-    "ms", "ml", "mr", "no", "fa", "pl", "pt", "pa", "ro", "ru", "sr", "sk",
-    "sl", "es", "sw", "sv", "tl", "ta", "te", "th", "tr", "uk", "ur", "vi",
-    "cy",
+    "auto", "af", "sq", "ar", "az", "eu", "be", "bn", "bs", "bg", "ca", "zh", "hr", "cs", "da",
+    "nl", "en", "et", "fi", "fr", "gl", "de", "el", "gu", "he", "hi", "hu", "id", "it", "ja", "kn",
+    "kk", "ko", "lv", "lt", "mk", "ms", "ml", "mr", "no", "fa", "pl", "pt", "pa", "ro", "ru", "sr",
+    "sk", "sl", "es", "sw", "sv", "tl", "ta", "te", "th", "tr", "uk", "ur", "vi", "cy",
 ];
 
 /// Speechmatics : 50+ langues + auto. Source SpeechmaticsProvider.swift.
 const SPEECHMATICS_LANGS: &[&str] = &[
-    "auto", "ar", "ba", "eu", "be", "bn", "bg", "yue", "ca", "hr", "cs", "da",
-    "nl", "en", "et", "fi", "fr", "gl", "de", "el", "he", "hi", "hu", "id",
-    "it", "ja", "ko", "lv", "lt", "ms", "mt", "mr", "mn", "no", "fa", "pl",
-    "pt", "ro", "ru", "sk", "sl", "es", "sw", "sv", "tl", "ta", "th", "tr",
-    "uk", "ur", "vi", "cy", "zh",
+    "auto", "ar", "ba", "eu", "be", "bn", "bg", "yue", "ca", "hr", "cs", "da", "nl", "en", "et",
+    "fi", "fr", "gl", "de", "el", "he", "hi", "hu", "id", "it", "ja", "ko", "lv", "lt", "ms", "mt",
+    "mr", "mn", "no", "fa", "pl", "pt", "ro", "ru", "sk", "sl", "es", "sw", "sv", "tl", "ta", "th",
+    "tr", "uk", "ur", "vi", "cy", "zh",
 ];
 
 /// xAI Grok STT : 25 langues + auto. Source XAIProvider.swift.
 const XAI_LANGS: &[&str] = &[
-    "auto", "ar", "cs", "da", "nl", "en", "fil", "fr", "de", "hi", "id",
-    "it", "ja", "ko", "mk", "ms", "fa", "pl", "pt", "ro", "ru", "es", "sv",
-    "th", "tr", "vi",
+    "auto", "ar", "cs", "da", "nl", "en", "fil", "fr", "de", "hi", "id", "it", "ja", "ko", "mk",
+    "ms", "fa", "pl", "pt", "ro", "ru", "es", "sv", "th", "tr", "vi",
 ];
 
 /// AssemblyAI Universal : 6 langues + auto. La liste est celle declaree par
 /// VoiceInk AssemblyAIProvider.swift (la realtime / streaming list, identique
 /// pour les 2 modeles cote Parla puisqu'on ne switche pas batch/streaming).
-const ASSEMBLYAI_LANGS: &[&str] =
-    &["auto", "de", "en", "es", "fr", "it", "pt"];
+const ASSEMBLYAI_LANGS: &[&str] = &["auto", "de", "en", "es", "fr", "it", "pt"];
 
 /// Cartesia Ink Whisper : 100 langues, PAS d'auto-detect (langue
 /// obligatoire dans la query string). Source CartesiaProvider.swift.
 const CARTESIA_LANGS: &[&str] = &[
-    "af", "am", "ar", "as", "az", "ba", "be", "bg", "bn", "bo", "br", "bs",
-    "ca", "cs", "cy", "da", "de", "el", "en", "es", "et", "eu", "fa", "fi",
-    "fo", "fr", "gl", "gu", "ha", "haw", "he", "hi", "hr", "ht", "hu", "hy",
-    "id", "is", "it", "ja", "jw", "ka", "kk", "km", "kn", "ko", "la", "lb",
-    "ln", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt",
-    "my", "ne", "nl", "nn", "no", "oc", "pa", "pl", "ps", "pt", "ro", "ru",
-    "sa", "sd", "si", "sk", "sl", "sn", "so", "sq", "sr", "su", "sv", "sw",
-    "ta", "te", "tg", "th", "tk", "tl", "tr", "tt", "uk", "ur", "uz", "vi",
-    "yi", "yo", "yue", "zh", "zu",
+    "af", "am", "ar", "as", "az", "ba", "be", "bg", "bn", "bo", "br", "bs", "ca", "cs", "cy", "da",
+    "de", "el", "en", "es", "et", "eu", "fa", "fi", "fo", "fr", "gl", "gu", "ha", "haw", "he",
+    "hi", "hr", "ht", "hu", "hy", "id", "is", "it", "ja", "jw", "ka", "kk", "km", "kn", "ko", "la",
+    "lb", "ln", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt", "my", "ne", "nl",
+    "nn", "no", "oc", "pa", "pl", "ps", "pt", "ro", "ru", "sa", "sd", "si", "sk", "sl", "sn", "so",
+    "sq", "sr", "su", "sv", "sw", "ta", "te", "tg", "th", "tk", "tl", "tr", "tt", "uk", "ur", "uz",
+    "vi", "yi", "yo", "yue", "zh", "zu",
 ];
 
 #[derive(Debug, Clone, Serialize)]
@@ -112,7 +101,7 @@ pub struct CloudModelInfo {
 
 /// Catalogue des providers cloud (id canonique lowercase).
 pub fn cloud_providers() -> &'static [CloudProviderInfo] {
-    &PROVIDERS
+    PROVIDERS
 }
 
 static PROVIDERS: &[CloudProviderInfo] = &[

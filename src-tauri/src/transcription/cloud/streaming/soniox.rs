@@ -23,13 +23,12 @@
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use super::session::{
-    connect_ws_url, drain_ws_messages, i16_to_le_bytes, StreamingChannels, StreamingConfig,
-    StreamingEvent, StreamingProvider,
+    connect_streaming_socket, drain_ws_messages, i16_to_le_bytes, StreamingChannels,
+    StreamingConfig, StreamingEvent, StreamingMessage, StreamingProvider,
 };
 
 pub struct SonioxStreaming;
@@ -48,8 +47,14 @@ impl StreamingProvider for SonioxStreaming {
         on_event: Box<dyn Fn(StreamingEvent) + Send + Sync>,
     ) -> Result<String> {
         let url = "wss://stt-rt.soniox.com/transcribe-websocket";
-        let ws_stream = connect_ws_url(url).await?;
-        let (mut write, mut read) = ws_stream.split();
+        let request = url
+            .into_client_request()
+            .map_err(|e| anyhow!("ws url parse: {e}"))?;
+        let socket = connect_streaming_socket(request).await?;
+        let super::session::StreamingSocket {
+            mut write,
+            mut read,
+        } = socket;
 
         // Message de configuration initial.
         let mut payload = serde_json::Map::new();
@@ -77,9 +82,7 @@ impl StreamingProvider for SonioxStreaming {
         }
 
         write
-            .send(Message::Text(
-                serde_json::to_string(&payload).unwrap().into(),
-            ))
+            .send_text(serde_json::to_string(&payload).unwrap())
             .await?;
         on_event(StreamingEvent::SessionStarted);
 
@@ -95,17 +98,20 @@ impl StreamingProvider for SonioxStreaming {
                 biased;
                 _ = &mut finalize_rx => {
                     while let Ok(chunk) = audio_rx.try_recv() {
-                        let _ = write.send(Message::Binary(i16_to_le_bytes(&chunk).into())).await;
+                        let _ = write.send_binary(i16_to_le_bytes(&chunk)).await;
                     }
-                    let _ = write.send(Message::Text(json!({ "type": "finalize" }).to_string().into())).await;
-                    let text = drain(&mut read, &mut final_text, &on_event).await;
+                    let _ = write.send_text(json!({ "type": "finalize" }).to_string()).await;
+                    drain_ws_messages(read.as_mut(), std::time::Duration::from_secs(5), |text| {
+                        handle_text(text, &mut final_text, &on_event)
+                    }).await;
+                    let text = final_text.trim().to_string();
                     let _ = write.close().await;
                     return Ok(text);
                 }
                 chunk = audio_rx.recv() => {
                     match chunk {
                         Some(c) => {
-                            if let Err(e) = write.send(Message::Binary(i16_to_le_bytes(&c).into())).await {
+                            if let Err(e) = write.send_binary(i16_to_le_bytes(&c)).await {
                                 return Err(anyhow!("ws send: {e}"));
                             }
                         }
@@ -114,31 +120,16 @@ impl StreamingProvider for SonioxStreaming {
                 }
                 msg = read.next() => {
                     match msg {
-                        Some(Ok(Message::Text(t))) => handle_text(&t, &mut final_text, &on_event),
-                        Some(Ok(Message::Close(_))) => return Ok(final_text),
-                        Some(Ok(_)) => {}
-                        Some(Err(e)) => return Err(anyhow!("ws read: {e}")),
-                        None => return Ok(final_text),
+                        Ok(Some(StreamingMessage::Text(t))) => handle_text(&t, &mut final_text, &on_event),
+                        Ok(Some(StreamingMessage::Close)) => return Ok(final_text),
+                        Ok(Some(StreamingMessage::Binary(_))) => {}
+                        Err(e) => return Err(anyhow!("ws read: {e}")),
+                        Ok(None) => return Ok(final_text),
                     }
                 }
             }
         }
     }
-}
-
-async fn drain<S>(
-    read: &mut S,
-    final_text: &mut String,
-    on_event: &(dyn Fn(StreamingEvent) + Send + Sync),
-) -> String
-where
-    S: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
-{
-    drain_ws_messages(read, std::time::Duration::from_secs(5), |t| {
-        handle_text(t, final_text, on_event)
-    })
-    .await;
-    final_text.trim().to_string()
 }
 
 fn handle_text(

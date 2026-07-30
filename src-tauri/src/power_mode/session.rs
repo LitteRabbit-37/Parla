@@ -143,10 +143,7 @@ pub fn apply(app: &AppHandle, cfg: &PowerModeConfig) -> Result<()> {
                     );
                 }
                 if let Some(m) = &cfg.cloud_model {
-                    store.set(
-                        "selected_cloud_model",
-                        serde_json::Value::String(m.clone()),
-                    );
+                    store.set("selected_cloud_model", serde_json::Value::String(m.clone()));
                 }
             }
             "parakeet" => {
@@ -191,11 +188,27 @@ pub fn restore(app: &AppHandle, b: &Baseline) -> Result<()> {
         (None, _) => {}
     }
 
-    set_or_delete(&store, "transcription_source_kind", b.transcription_kind.as_deref());
-    set_or_delete(&store, "selected_whisper_model", b.whisper_model_id.as_deref());
-    set_or_delete(&store, "selected_cloud_provider", b.cloud_provider.as_deref());
+    set_or_delete(
+        &store,
+        "transcription_source_kind",
+        b.transcription_kind.as_deref(),
+    );
+    set_or_delete(
+        &store,
+        "selected_whisper_model",
+        b.whisper_model_id.as_deref(),
+    );
+    set_or_delete(
+        &store,
+        "selected_cloud_provider",
+        b.cloud_provider.as_deref(),
+    );
     set_or_delete(&store, "selected_cloud_model", b.cloud_model.as_deref());
-    set_or_delete(&store, "selected_parakeet_model", b.parakeet_model_id.as_deref());
+    set_or_delete(
+        &store,
+        "selected_parakeet_model",
+        b.parakeet_model_id.as_deref(),
+    );
     set_or_delete(&store, "whisper_language", b.language.as_deref());
 
     store.save().map_err(|e| anyhow!("store save: {e}"))?;

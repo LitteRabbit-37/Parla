@@ -32,6 +32,7 @@ parking_lot = "0.12"
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 
 # Audio capture WASAPI (via cpal)
 cpal = "0.15"
@@ -55,7 +56,7 @@ chrono = { version = "0.4", default-features = false, features = ["serde", "cloc
 
 # Transcription Whisper locale
 whisper-rs = { version = "0.16", default-features = false }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "multipart", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["native-tls", "stream", "multipart", "json", "socks"] }
 futures-util = "0.3"
 
 # LLM enhancement embarque (llama.cpp).
@@ -80,7 +81,12 @@ async-trait = "0.1"
 base64 = "0.22"
 keyring = { version = "3", features = ["windows-native"] }
 urlencoding = "2"
+url = "2"
+ipnet = "2"
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+tokio-socks = "0.5"
+tokio-rustls = "0.26"
+webpki-roots = "0.26"
 
 # Detection GPU NVIDIA (CUDA runtime presence)
 nvml-wrapper = { version = "0.11", optional = true }
@@ -105,6 +111,7 @@ windows = { version = "0.60", features = [
   "Graphics_Imaging",
   "Storage_Streams",
   "Foundation_Collections",
+  "Win32_Networking_WinHttp",
 ] }
 
 # rustc 1.95 plante (STATUS_ACCESS_VIOLATION) en compilant tokenizers

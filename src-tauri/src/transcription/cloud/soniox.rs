@@ -17,11 +17,12 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use reqwest::multipart::Form;
 use serde::Deserialize;
 use serde_json::json;
 
-use super::http::{batch_client, map_http_err, wav_part_from_path};
+use super::http::{
+    http_status_error, read_wav_with_filename, BatchHttpClient, HttpRequest, MultipartEncoder,
+};
 use super::provider::{CloudTranscriptionProvider, TranscribeRequest};
 
 pub struct SonioxProvider;
@@ -50,15 +51,12 @@ impl CloudTranscriptionProvider for SonioxProvider {
     }
 
     async fn verify_api_key(&self, api_key: &str) -> Result<()> {
-        let client = batch_client()?;
-        let resp = client
-            .get("https://api.soniox.com/v1/files")
-            .bearer_auth(api_key)
-            .send()
-            .await
-            .map_err(map_http_err)?;
-        if !resp.status().is_success() {
-            anyhow::bail!("HTTP {}", resp.status());
+        let client = BatchHttpClient::new("https://api.soniox.com/v1/files")?;
+        let request = HttpRequest::new("GET", "https://api.soniox.com/v1/files")
+            .header("Authorization", format!("Bearer {api_key}"));
+        let response = client.send(request.clone()).await?;
+        if !(200..300).contains(&response.status) {
+            return Err(http_status_error(response.status, &response.body, &request));
         }
         Ok(())
     }
@@ -69,20 +67,27 @@ impl CloudTranscriptionProvider for SonioxProvider {
         api_key: &str,
         request: &TranscribeRequest,
     ) -> Result<String> {
-        let client = batch_client()?;
+        let client = BatchHttpClient::new("https://api.soniox.com/v1/files")?;
 
         // 1. Upload du fichier
-        let form = Form::new().part("file", wav_part_from_path(wav_path).await?);
-        let file_id = client
-            .post("https://api.soniox.com/v1/files")
-            .bearer_auth(api_key)
-            .multipart(form)
-            .send()
+        let (wav, filename) = read_wav_with_filename(wav_path).await?;
+        let multipart = MultipartEncoder::random().file("file", filename, "audio/wav", wav);
+        let upload_request = HttpRequest::new("POST", "https://api.soniox.com/v1/files")
+            .header("Authorization", format!("Bearer {api_key}"))
+            .header("Content-Type", multipart.content_type())
+            .body(multipart.try_encode()?);
+        let upload_response = client
+            .send(upload_request.clone())
             .await
-            .context("POST /v1/files")?
-            .error_for_status()?
-            .json::<IdResponse>()
-            .await
+            .context("POST /v1/files")?;
+        if !(200..300).contains(&upload_response.status) {
+            return Err(http_status_error(
+                upload_response.status,
+                &upload_response.body,
+                &upload_request,
+            ));
+        }
+        let file_id = serde_json::from_slice::<IdResponse>(&upload_response.body)
             .context("parse /v1/files response")?
             .id;
 
@@ -110,16 +115,24 @@ impl CloudTranscriptionProvider for SonioxProvider {
             );
         }
 
-        let trans_id = client
-            .post("https://api.soniox.com/v1/transcriptions")
-            .bearer_auth(api_key)
-            .json(&body)
-            .send()
+        let json_body = serde_json::to_vec(&body)?;
+        let transcription_request =
+            HttpRequest::new("POST", "https://api.soniox.com/v1/transcriptions")
+                .header("Authorization", format!("Bearer {api_key}"))
+                .header("Content-Type", "application/json")
+                .body(json_body);
+        let transcription_response = client
+            .send(transcription_request.clone())
             .await
-            .context("POST /v1/transcriptions")?
-            .error_for_status()?
-            .json::<IdResponse>()
-            .await
+            .context("POST /v1/transcriptions")?;
+        if !(200..300).contains(&transcription_response.status) {
+            return Err(http_status_error(
+                transcription_response.status,
+                &transcription_response.body,
+                &transcription_request,
+            ));
+        }
+        let trans_id = serde_json::from_slice::<IdResponse>(&transcription_response.body)
             .context("parse /v1/transcriptions response")?
             .id;
 
@@ -130,14 +143,20 @@ impl CloudTranscriptionProvider for SonioxProvider {
                 anyhow::bail!("timeout transcription Soniox");
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
-            let status: StatusResponse = client
-                .get(format!("https://api.soniox.com/v1/transcriptions/{trans_id}"))
-                .bearer_auth(api_key)
-                .send()
-                .await?
-                .error_for_status()?
-                .json()
-                .await?;
+            let status_request = HttpRequest::new(
+                "GET",
+                format!("https://api.soniox.com/v1/transcriptions/{trans_id}"),
+            )
+            .header("Authorization", format!("Bearer {api_key}"));
+            let status_response = client.send(status_request.clone()).await?;
+            if !(200..300).contains(&status_response.status) {
+                return Err(http_status_error(
+                    status_response.status,
+                    &status_response.body,
+                    &status_request,
+                ));
+            }
+            let status: StatusResponse = serde_json::from_slice(&status_response.body)?;
             match status.status.as_str() {
                 "completed" => break,
                 "failed" => anyhow::bail!("transcription Soniox echouee"),
@@ -146,15 +165,20 @@ impl CloudTranscriptionProvider for SonioxProvider {
         }
 
         // 4. Recuperation du transcript
-        let resp = client
-            .get(format!(
-                "https://api.soniox.com/v1/transcriptions/{trans_id}/transcript"
-            ))
-            .bearer_auth(api_key)
-            .send()
-            .await?
-            .error_for_status()?;
-        let body = resp.bytes().await?;
+        let transcript_request = HttpRequest::new(
+            "GET",
+            format!("https://api.soniox.com/v1/transcriptions/{trans_id}/transcript"),
+        )
+        .header("Authorization", format!("Bearer {api_key}"));
+        let transcript_response = client.send(transcript_request.clone()).await?;
+        if !(200..300).contains(&transcript_response.status) {
+            return Err(http_status_error(
+                transcript_response.status,
+                &transcript_response.body,
+                &transcript_request,
+            ));
+        }
+        let body = transcript_response.body;
         match serde_json::from_slice::<TranscriptJson>(&body) {
             Ok(TranscriptJson { text: Some(t) }) => Ok(t),
             _ => Ok(String::from_utf8_lossy(&body).trim().to_string()),

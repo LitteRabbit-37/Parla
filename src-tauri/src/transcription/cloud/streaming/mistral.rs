@@ -15,13 +15,12 @@
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use super::session::{
-    connect_ws, drain_ws_messages, i16_to_base64, StreamingChannels, StreamingConfig,
-    StreamingEvent, StreamingProvider,
+    connect_streaming_socket, drain_ws_messages, i16_to_base64, StreamingChannels, StreamingConfig,
+    StreamingEvent, StreamingMessage, StreamingProvider,
 };
 
 pub struct MistralStreaming;
@@ -55,28 +54,28 @@ impl StreamingProvider for MistralStreaming {
         req.headers_mut()
             .insert("Authorization", format!("Bearer {api_key}").parse()?);
 
-        let ws_stream = connect_ws(req).await?;
-        let (mut write, mut read) = ws_stream.split();
+        let socket = connect_streaming_socket(req).await?;
+        let super::session::StreamingSocket {
+            mut write,
+            mut read,
+        } = socket;
 
         // Handshake : attend session.created.
         loop {
             match read.next().await {
-                Some(Ok(Message::Text(t))) => {
+                Ok(Some(StreamingMessage::Text(t))) => {
                     let json: Value = serde_json::from_str(&t)?;
                     match json.get("type").and_then(|v| v.as_str()) {
                         Some("session.created") => break,
                         Some("error") => {
-                            return Err(anyhow!(
-                                "Mistral handshake: {}",
-                                extract_error(&json)
-                            ));
+                            return Err(anyhow!("Mistral handshake: {}", extract_error(&json)));
                         }
                         _ => continue,
                     }
                 }
-                Some(Ok(_)) => continue,
-                Some(Err(e)) => return Err(anyhow!("ws read: {e}")),
-                None => return Err(anyhow!("ws closed during handshake")),
+                Ok(Some(_)) => continue,
+                Err(e) => return Err(anyhow!("ws read: {e}")),
+                Ok(None) => return Err(anyhow!("ws closed during handshake")),
             }
         }
 
@@ -87,9 +86,7 @@ impl StreamingProvider for MistralStreaming {
                 "audio_format": { "encoding": "pcm_s16le", "sample_rate": 16000 }
             }
         });
-        write
-            .send(Message::Text(update.to_string().into()))
-            .await?;
+        write.send_text(update.to_string()).await?;
 
         on_event(StreamingEvent::SessionStarted);
 
@@ -107,10 +104,18 @@ impl StreamingProvider for MistralStreaming {
                 _ = &mut finalize_rx => {
                     while let Ok(chunk) = audio_rx.try_recv() {
                         let msg = json!({ "type": "input_audio.append", "audio": i16_to_base64(&chunk) });
-                        let _ = write.send(Message::Text(msg.to_string().into())).await;
+                        let _ = write.send_text(msg.to_string()).await;
                     }
-                    let _ = write.send(Message::Text(json!({ "type": "input_audio.end" }).to_string().into())).await;
-                    let final_text = drain(&mut read, &mut accumulated, &mut committed_text, &on_event).await;
+                    let _ = write.send_text(json!({ "type": "input_audio.end" }).to_string()).await;
+                    drain_ws_messages(read.as_mut(), std::time::Duration::from_secs(5), |text| {
+                        handle_text(text, &mut accumulated, &mut committed_text, &on_event)
+                    }).await;
+                    let final_text = if committed_text.is_empty() && !accumulated.is_empty() {
+                        committed_text.push_str(&accumulated);
+                        committed_text.trim().to_string()
+                    } else {
+                        committed_text.trim().to_string()
+                    };
                     let _ = write.close().await;
                     return Ok(final_text);
                 }
@@ -118,7 +123,7 @@ impl StreamingProvider for MistralStreaming {
                     match chunk {
                         Some(c) => {
                             let msg = json!({ "type": "input_audio.append", "audio": i16_to_base64(&c) });
-                            if let Err(e) = write.send(Message::Text(msg.to_string().into())).await {
+                            if let Err(e) = write.send_text(msg.to_string()).await {
                                 return Err(anyhow!("ws send: {e}"));
                             }
                         }
@@ -127,35 +132,16 @@ impl StreamingProvider for MistralStreaming {
                 }
                 msg = read.next() => {
                     match msg {
-                        Some(Ok(Message::Text(t))) => handle_text(&t, &mut accumulated, &mut committed_text, &on_event),
-                        Some(Ok(Message::Close(_))) => return Ok(committed_text),
-                        Some(Ok(_)) => {}
-                        Some(Err(e)) => return Err(anyhow!("ws read: {e}")),
-                        None => return Ok(committed_text),
+                        Ok(Some(StreamingMessage::Text(t))) => handle_text(&t, &mut accumulated, &mut committed_text, &on_event),
+                        Ok(Some(StreamingMessage::Close)) => return Ok(committed_text),
+                        Ok(Some(_)) => {}
+                        Err(e) => return Err(anyhow!("ws read: {e}")),
+                        Ok(None) => return Ok(committed_text),
                     }
                 }
             }
         }
     }
-}
-
-async fn drain<S>(
-    read: &mut S,
-    accumulated: &mut String,
-    committed: &mut String,
-    on_event: &(dyn Fn(StreamingEvent) + Send + Sync),
-) -> String
-where
-    S: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
-{
-    drain_ws_messages(read, std::time::Duration::from_secs(5), |t| {
-        handle_text(t, accumulated, committed, on_event)
-    })
-    .await;
-    if committed.is_empty() && !accumulated.is_empty() {
-        committed.push_str(accumulated);
-    }
-    committed.trim().to_string()
 }
 
 fn handle_text(

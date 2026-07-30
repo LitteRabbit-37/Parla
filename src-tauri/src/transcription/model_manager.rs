@@ -11,11 +11,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use futures_util::StreamExt;
 use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::io::AsyncWriteExt;
 use tracing::{info, warn};
 
 use super::model::{find_model, WhisperModelInfo, WHISPER_FULL_LANGS, WHISPER_MODELS};
@@ -154,10 +152,7 @@ impl ModelManager {
                     speed: 0.0,
                     accuracy: 0.0,
                     // Hypothese raisonnable : le fichier importe est multilingue.
-                    language_codes: WHISPER_FULL_LANGS
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect(),
+                    language_codes: WHISPER_FULL_LANGS.iter().map(|s| s.to_string()).collect(),
                 });
             }
         }
@@ -220,10 +215,16 @@ impl ModelManager {
             if flags.contains_key(id) {
                 return Err(anyhow!("telechargement deja en cours: {id}"));
             }
-            flags.insert(id.to_string(), Arc::new(std::sync::atomic::AtomicBool::new(false)));
+            flags.insert(
+                id.to_string(),
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            );
         }
         let result = self.download_impl(id).await;
         self.cancel_flags.lock().remove(id);
+        if let Err(error) = &result {
+            self.emit_error(id, crate::services::download::diagnostic(error));
+        }
         result
     }
 
@@ -242,68 +243,26 @@ impl ModelManager {
             .cloned()
             .ok_or_else(|| anyhow!("cancel flag missing for {id}"))?;
 
-        let tmp = target.with_extension("bin.part");
-        // Efface un eventuel tmp precedent.
-        let _ = fs::remove_file(&tmp);
-
-        let client = reqwest::Client::new();
-        let resp = client
-            .get(model.url)
-            .send()
-            .await
-            .with_context(|| format!("GET {}", model.url))?;
-        if !resp.status().is_success() {
-            anyhow::bail!("HTTP {} depuis {}", resp.status(), model.url);
-        }
-        let total = resp.content_length().unwrap_or(model.size_bytes);
-
-        let mut file = tokio::fs::File::create(&tmp)
-            .await
-            .with_context(|| format!("create {}", tmp.display()))?;
-        let mut stream = resp.bytes_stream();
-        let mut downloaded: u64 = 0;
-        let mut last_emit = std::time::Instant::now();
-
-        while let Some(chunk) = stream.next().await {
-            if cancel.load(std::sync::atomic::Ordering::SeqCst) {
-                // Cleanup du fichier partiel. Cancel flag is removed by
-                // the outer download() wrapper on return.
-                drop(file);
-                let _ = fs::remove_file(&tmp);
-                return Err(anyhow!("telechargement annule"));
-            }
-            let bytes = chunk.context("chunk recv")?;
-            file.write_all(&bytes).await?;
-            downloaded += bytes.len() as u64;
-
-            // Throttle les emits a ~20 Hz pour eviter de saturer le bridge IPC.
-            if last_emit.elapsed() >= std::time::Duration::from_millis(50) {
-                let _ = self.app.emit(
+        let url = url::Url::parse(model.url)?;
+        let app = self.app.clone();
+        let id_owned = id.to_owned();
+        crate::services::download::download_to_file(
+            &url,
+            &target,
+            model.size_bytes,
+            Some(cancel),
+            move |downloaded, total| {
+                let _ = app.emit(
                     "model:download:progress",
                     DownloadProgress {
-                        id: id.to_string(),
+                        id: id_owned.clone(),
                         downloaded,
                         total,
                     },
                 );
-                last_emit = std::time::Instant::now();
-            }
-        }
-        file.flush().await?;
-        drop(file);
-
-        // Dernier emit a 100 %.
-        let _ = self.app.emit(
-            "model:download:progress",
-            DownloadProgress {
-                id: id.to_string(),
-                downloaded,
-                total,
             },
-        );
-
-        fs::rename(&tmp, &target)
-            .with_context(|| format!("rename {} -> {}", tmp.display(), target.display()))?;
+        )
+        .await?;
 
         info!(id, path = %target.display(), "Modele telecharge");
 
@@ -331,8 +290,7 @@ impl ModelManager {
         let model = find_model(id).ok_or_else(|| anyhow!("modele inconnu: {id}"))?;
         let path = self.model_path(model)?;
         if path.exists() {
-            fs::remove_file(&path)
-                .with_context(|| format!("remove {}", path.display()))?;
+            fs::remove_file(&path).with_context(|| format!("remove {}", path.display()))?;
             info!(id, "Modele supprime");
         }
         Ok(())

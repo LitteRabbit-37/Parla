@@ -18,13 +18,12 @@
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
-use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use super::session::{
-    connect_ws, drain_ws_messages, i16_to_le_bytes, StreamingChannels, StreamingConfig,
-    StreamingEvent, StreamingProvider,
+    connect_streaming_socket, drain_ws_messages, i16_to_le_bytes, StreamingChannels,
+    StreamingConfig, StreamingEvent, StreamingMessage, StreamingProvider,
 };
 
 pub struct CartesiaStreaming;
@@ -66,8 +65,11 @@ impl StreamingProvider for CartesiaStreaming {
                 .map_err(|e| anyhow!("X-API-Key header: {e}"))?,
         );
 
-        let ws_stream = connect_ws(req).await?;
-        let (mut write, mut read) = ws_stream.split();
+        let socket = connect_streaming_socket(req).await?;
+        let super::session::StreamingSocket {
+            mut write,
+            mut read,
+        } = socket;
 
         on_event(StreamingEvent::SessionStarted);
 
@@ -83,14 +85,14 @@ impl StreamingProvider for CartesiaStreaming {
                 biased;
                 _ = &mut finalize_rx => {
                     while let Ok(chunk) = audio_rx.try_recv() {
-                        let _ = write.send(Message::Binary(i16_to_le_bytes(&chunk).into())).await;
+                        let _ = write.send_binary(i16_to_le_bytes(&chunk)).await;
                     }
-                    let _ = write.send(Message::Text("finalize".into())).await;
-                    drain_ws_messages(&mut read, std::time::Duration::from_secs(5), |t| {
+                    let _ = write.send_text("finalize".to_string()).await;
+                    drain_ws_messages(read.as_mut(), std::time::Duration::from_secs(5), |t| {
                         handle_text(t, &mut state, &on_event);
                     })
                     .await;
-                    let _ = write.send(Message::Text("done".into())).await;
+                    let _ = write.send_text("done".to_string()).await;
                     let _ = write.close().await;
                     return Ok(state.final_text.trim().to_string());
                 }
@@ -98,7 +100,7 @@ impl StreamingProvider for CartesiaStreaming {
                     match chunk {
                         Some(c) => {
                             if let Err(e) = write
-                                .send(Message::Binary(i16_to_le_bytes(&c).into()))
+                                .send_binary(i16_to_le_bytes(&c))
                                 .await
                             {
                                 return Err(anyhow!("ws send: {e}"));
@@ -108,11 +110,10 @@ impl StreamingProvider for CartesiaStreaming {
                     }
                 }
                 msg = read.next() => {
-                    match msg {
-                        Some(Ok(Message::Text(t))) => handle_text(&t, &mut state, &on_event),
-                        Some(Ok(Message::Close(_))) => return Ok(state.final_text.trim().to_string()),
-                        Some(Ok(_)) => {}
-                        Some(Err(e)) => return Err(anyhow!("ws read: {e}")),
+                    match msg? {
+                        Some(StreamingMessage::Text(t)) => handle_text(&t, &mut state, &on_event),
+                        Some(StreamingMessage::Close) => return Ok(state.final_text.trim().to_string()),
+                        Some(_) => {}
                         None => return Ok(state.final_text.trim().to_string()),
                     }
                 }

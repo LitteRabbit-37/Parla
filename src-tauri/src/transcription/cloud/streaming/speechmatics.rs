@@ -23,13 +23,12 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use super::session::{
-    connect_ws, drain_ws_messages, i16_to_le_bytes, StreamingChannels, StreamingConfig,
-    StreamingEvent, StreamingProvider,
+    connect_streaming_socket, drain_ws_messages, i16_to_le_bytes, StreamingChannels,
+    StreamingConfig, StreamingEvent, StreamingMessage, StreamingProvider,
 };
 
 pub struct SpeechmaticsStreaming;
@@ -62,8 +61,11 @@ impl StreamingProvider for SpeechmaticsStreaming {
         req.headers_mut()
             .insert("Authorization", format!("Bearer {api_key}").parse()?);
 
-        let ws_stream = connect_ws(req).await?;
-        let (mut write, mut read) = ws_stream.split();
+        let socket = connect_streaming_socket(req).await?;
+        let super::session::StreamingSocket {
+            mut write,
+            mut read,
+        } = socket;
 
         // Construit transcription_config.
         let lang = map_lang_streaming(config.language.as_deref()).to_string();
@@ -87,7 +89,7 @@ impl StreamingProvider for SpeechmaticsStreaming {
             "audio_format": { "type": "raw", "encoding": "pcm_s16le", "sample_rate": 16000 },
             "transcription_config": tcfg,
         });
-        write.send(Message::Text(start.to_string().into())).await?;
+        write.send_text(start.to_string()).await?;
 
         // Handshake : attendre RecognitionStarted (10 s).
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
@@ -97,7 +99,7 @@ impl StreamingProvider for SpeechmaticsStreaming {
             }
             let timeout = deadline - tokio::time::Instant::now();
             match tokio::time::timeout(timeout, read.next()).await {
-                Ok(Some(Ok(Message::Text(t)))) => {
+                Ok(Ok(Some(StreamingMessage::Text(t)))) => {
                     let json: Value = serde_json::from_str(&t)?;
                     match json.get("message").and_then(|v| v.as_str()) {
                         Some("RecognitionStarted") => break,
@@ -112,9 +114,9 @@ impl StreamingProvider for SpeechmaticsStreaming {
                         _ => continue,
                     }
                 }
-                Ok(Some(Ok(_))) => continue,
-                Ok(Some(Err(e))) => return Err(anyhow!("ws read: {e}")),
-                Ok(None) => return Err(anyhow!("ws closed during handshake")),
+                Ok(Ok(Some(_))) => continue,
+                Ok(Err(e)) => return Err(anyhow!("ws read: {e}")),
+                Ok(Ok(None)) => return Err(anyhow!("ws closed during handshake")),
                 Err(_) => continue,
             }
         }
@@ -133,19 +135,22 @@ impl StreamingProvider for SpeechmaticsStreaming {
                 biased;
                 _ = &mut finalize_rx => {
                     while let Ok(chunk) = audio_rx.try_recv() {
-                        let _ = write.send(Message::Binary(i16_to_le_bytes(&chunk).into())).await;
+                        let _ = write.send_binary(i16_to_le_bytes(&chunk)).await;
                         seq_no += 1;
                     }
                     let end = json!({ "message": "EndOfStream", "last_seq_no": seq_no });
-                    let _ = write.send(Message::Text(end.to_string().into())).await;
-                    let text = drain(&mut read, &mut accumulated_final, &on_event).await;
+                    let _ = write.send_text(end.to_string()).await;
+                    drain_ws_messages(read.as_mut(), Duration::from_secs(5), |text| {
+                        handle_text(text, &mut accumulated_final, &on_event)
+                    }).await;
+                    let text = clean_punctuation(accumulated_final.trim());
                     let _ = write.close().await;
                     return Ok(text);
                 }
                 chunk = audio_rx.recv() => {
                     match chunk {
                         Some(c) => {
-                            if let Err(e) = write.send(Message::Binary(i16_to_le_bytes(&c).into())).await {
+                            if let Err(e) = write.send_binary(i16_to_le_bytes(&c)).await {
                                 return Err(anyhow!("ws send: {e}"));
                             }
                             seq_no += 1;
@@ -155,31 +160,16 @@ impl StreamingProvider for SpeechmaticsStreaming {
                 }
                 msg = read.next() => {
                     match msg {
-                        Some(Ok(Message::Text(t))) => handle_text(&t, &mut accumulated_final, &on_event),
-                        Some(Ok(Message::Close(_))) => return Ok(accumulated_final),
-                        Some(Ok(_)) => {}
-                        Some(Err(e)) => return Err(anyhow!("ws read: {e}")),
-                        None => return Ok(accumulated_final),
+                        Ok(Some(StreamingMessage::Text(t))) => handle_text(&t, &mut accumulated_final, &on_event),
+                        Ok(Some(StreamingMessage::Close)) => return Ok(accumulated_final),
+                        Ok(Some(_)) => {}
+                        Err(e) => return Err(anyhow!("ws read: {e}")),
+                        Ok(None) => return Ok(accumulated_final),
                     }
                 }
             }
         }
     }
-}
-
-async fn drain<S>(
-    read: &mut S,
-    accumulated: &mut String,
-    on_event: &(dyn Fn(StreamingEvent) + Send + Sync),
-) -> String
-where
-    S: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
-{
-    drain_ws_messages(read, Duration::from_secs(5), |t| {
-        handle_text(t, accumulated, on_event)
-    })
-    .await;
-    clean_punctuation(accumulated.trim())
 }
 
 fn handle_text(

@@ -60,7 +60,9 @@ pub fn init(conn: &Connection) -> Result<()> {
     // Migration incrementale. V1 -> V2 : ajout table transcriptions (deja
     // faite par CREATE TABLE IF NOT EXISTS ci-dessus, rien d'autre a faire).
     let current: Option<i32> = conn
-        .query_row("SELECT version FROM schema_version LIMIT 1", [], |row| row.get(0))
+        .query_row("SELECT version FROM schema_version LIMIT 1", [], |row| {
+            row.get(0)
+        })
         .ok();
     match current {
         None => {
@@ -70,10 +72,7 @@ pub fn init(conn: &Connection) -> Result<()> {
             )?;
         }
         Some(v) if v < CURRENT_VERSION => {
-            conn.execute(
-                "UPDATE schema_version SET version = ?1",
-                [CURRENT_VERSION],
-            )?;
+            conn.execute("UPDATE schema_version SET version = ?1", [CURRENT_VERSION])?;
         }
         _ => {}
     }

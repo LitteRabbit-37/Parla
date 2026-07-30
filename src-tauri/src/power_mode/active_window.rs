@@ -98,14 +98,7 @@ unsafe fn process_image_path(pid: u32) -> Result<PathBuf> {
 /// Liste courte des exe de navigateurs supportes. Utilise pour savoir quand
 /// declencher l'extraction d'URL.
 pub const BROWSER_EXES: &[&str] = &[
-    "chrome",
-    "msedge",
-    "brave",
-    "vivaldi",
-    "opera",
-    "firefox",
-    "arc",
-    "zen",
+    "chrome", "msedge", "brave", "vivaldi", "opera", "firefox", "arc", "zen",
     "browser", // Safari sous Windows n'existe plus, mais Yandex / autres.
 ];
 

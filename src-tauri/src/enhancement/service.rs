@@ -92,9 +92,7 @@ pub fn get_selection(app: &AppHandle) -> Option<LLMSelection> {
 }
 
 pub fn set_selection(app: &AppHandle, provider_id: &str, model: &str) -> Result<()> {
-    let store = app
-        .store(STORE_FILE)
-        .map_err(|e| anyhow!("store: {e}"))?;
+    let store = app.store(STORE_FILE).map_err(|e| anyhow!("store: {e}"))?;
     store.set(
         KEY_LLM_PROVIDER,
         serde_json::Value::String(provider_id.into()),
@@ -145,7 +143,11 @@ pub fn has_provider_configured(app: &AppHandle) -> bool {
     // Custom provider : la cle peut etre facultative selon l'endpoint.
     let requires_key = app
         .try_state::<EnhancementState>()
-        .and_then(|s| s.registry.find(&sel.provider_id).map(|p| p.requires_api_key()))
+        .and_then(|s| {
+            s.registry
+                .find(&sel.provider_id)
+                .map(|p| p.requires_api_key())
+        })
         .unwrap_or(true);
     if !requires_key {
         return true;
@@ -157,8 +159,8 @@ pub fn has_provider_configured(app: &AppHandle) -> bool {
 /// Format : `{gguf_path}|{n_gpu_layers}|{context_size}|{max_tokens}`.
 fn build_llamacpp_endpoint(app: &AppHandle) -> Result<Option<String>> {
     use super::providers::llamacpp as llcp;
-    let id = llcp::get_selected_gguf(app)
-        .ok_or_else(|| anyhow!("aucun modele GGUF selectionne"))?;
+    let id =
+        llcp::get_selected_gguf(app).ok_or_else(|| anyhow!("aucun modele GGUF selectionne"))?;
     let mgr_state = app
         .try_state::<crate::commands::llm_models::GgufModelManagerState>()
         .ok_or_else(|| anyhow!("gguf manager state absent"))?;
@@ -214,9 +216,7 @@ fn reasoning_for(provider_id: &str, model: &str) -> ReasoningConfig {
         }
         (
             "gemini",
-            "gemini-3.1-pro-preview"
-            | "gemini-3-flash-preview"
-            | "gemini-3.1-flash-lite-preview",
+            "gemini-3.1-pro-preview" | "gemini-3-flash-preview" | "gemini-3.1-flash-lite-preview",
         ) => {
             cfg.effort = Some("minimal".into());
         }
@@ -350,9 +350,7 @@ pub async fn enhance_with_override(
     let endpoint_override = match provider.id() {
         "ollama" => Some(super::providers::ollama::get_base_url(&app)),
         "custom" => super::providers::custom::get_base_url(&app),
-        "localcli" if model == "custom" => {
-            super::providers::local_cli::get_custom_cmd(&app)
-        }
+        "localcli" if model == "custom" => super::providers::local_cli::get_custom_cmd(&app),
         "llamacpp" => build_llamacpp_endpoint(&app)?,
         _ => None,
     };
@@ -495,7 +493,10 @@ mod tests {
         let r = reasoning_for("cerebras", "zai-glm-4.7");
         assert_eq!(r.effort, None);
         let body = r.extra_body.expect("extra_body attendu pour zai-glm");
-        assert_eq!(body.get("disable_reasoning"), Some(&serde_json::Value::Bool(true)));
+        assert_eq!(
+            body.get("disable_reasoning"),
+            Some(&serde_json::Value::Bool(true))
+        );
     }
 
     #[test]

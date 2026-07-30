@@ -113,14 +113,38 @@ fn apply_live(manager: &Arc<HotkeyManager>, cfg: &HotkeyConfig) {
 #[command]
 pub fn list_hotkey_options() -> Vec<HotkeyOptionInfo> {
     vec![
-        HotkeyOptionInfo { id: HotkeyOption::None, vk: None },
-        HotkeyOptionInfo { id: HotkeyOption::RightAlt, vk: HotkeyOption::RightAlt.vk() },
-        HotkeyOptionInfo { id: HotkeyOption::LeftAlt, vk: HotkeyOption::LeftAlt.vk() },
-        HotkeyOptionInfo { id: HotkeyOption::RightCtrl, vk: HotkeyOption::RightCtrl.vk() },
-        HotkeyOptionInfo { id: HotkeyOption::LeftCtrl, vk: HotkeyOption::LeftCtrl.vk() },
-        HotkeyOptionInfo { id: HotkeyOption::RightWin, vk: HotkeyOption::RightWin.vk() },
-        HotkeyOptionInfo { id: HotkeyOption::RightShift, vk: HotkeyOption::RightShift.vk() },
-        HotkeyOptionInfo { id: HotkeyOption::LeftShift, vk: HotkeyOption::LeftShift.vk() },
+        HotkeyOptionInfo {
+            id: HotkeyOption::None,
+            vk: None,
+        },
+        HotkeyOptionInfo {
+            id: HotkeyOption::RightAlt,
+            vk: HotkeyOption::RightAlt.vk(),
+        },
+        HotkeyOptionInfo {
+            id: HotkeyOption::LeftAlt,
+            vk: HotkeyOption::LeftAlt.vk(),
+        },
+        HotkeyOptionInfo {
+            id: HotkeyOption::RightCtrl,
+            vk: HotkeyOption::RightCtrl.vk(),
+        },
+        HotkeyOptionInfo {
+            id: HotkeyOption::LeftCtrl,
+            vk: HotkeyOption::LeftCtrl.vk(),
+        },
+        HotkeyOptionInfo {
+            id: HotkeyOption::RightWin,
+            vk: HotkeyOption::RightWin.vk(),
+        },
+        HotkeyOptionInfo {
+            id: HotkeyOption::RightShift,
+            vk: HotkeyOption::RightShift.vk(),
+        },
+        HotkeyOptionInfo {
+            id: HotkeyOption::LeftShift,
+            vk: HotkeyOption::LeftShift.vk(),
+        },
     ]
 }
 

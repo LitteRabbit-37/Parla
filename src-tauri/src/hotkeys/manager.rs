@@ -23,18 +23,13 @@ const ACTION_COOLDOWN: Duration = Duration::from_millis(500);
 /// Fenetre pour double-tap Escape (VoiceInk MiniRecorderShortcutManager L43).
 const ESC_DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(1500);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum HotkeyMode {
     Toggle,
     PushToTalk,
+    #[default]
     Hybrid,
-}
-
-impl Default for HotkeyMode {
-    fn default() -> Self {
-        HotkeyMode::Hybrid
-    }
 }
 
 /// Action derivee par le manager et consommee par le reste de l'app.
@@ -108,9 +103,7 @@ impl HotkeyManager {
             // Selection Power Mode : pass-through direct, sans passer par la
             // machine a etats toggle/PTT/hybrid ni le cooldown (le gating est
             // fait en amont par le hook via POWER_SHORTCUT_COUNT).
-            HotkeyEvent::SelectPowerMode { index } => {
-                Some(HotkeyAction::SelectPowerMode(index))
-            }
+            HotkeyEvent::SelectPowerMode { index } => Some(HotkeyAction::SelectPowerMode(index)),
         }
     }
 
@@ -200,7 +193,10 @@ impl HotkeyManager {
                 if press_duration >= HYBRID_PRESS_THRESHOLD && state.is_recording {
                     state.is_recording = false;
                     state.last_action_at = Some(timestamp);
-                    info!(duration_ms = press_duration.as_millis() as u64, "Hybrid: stop (PTT)");
+                    info!(
+                        duration_ms = press_duration.as_millis() as u64,
+                        "Hybrid: stop (PTT)"
+                    );
                     Some(HotkeyAction::StopRecording)
                 } else if state.is_recording {
                     state.is_hands_free = true;
@@ -262,10 +258,16 @@ mod tests {
     const SLOT: HotkeySlot = HotkeySlot::Primary;
 
     fn pressed(t: Instant) -> HotkeyEvent {
-        HotkeyEvent::Pressed { slot: SLOT, timestamp: t }
+        HotkeyEvent::Pressed {
+            slot: SLOT,
+            timestamp: t,
+        }
     }
     fn released(t: Instant) -> HotkeyEvent {
-        HotkeyEvent::Released { slot: SLOT, timestamp: t }
+        HotkeyEvent::Released {
+            slot: SLOT,
+            timestamp: t,
+        }
     }
     fn esc(t: Instant) -> HotkeyEvent {
         HotkeyEvent::EscapePressed { timestamp: t }
@@ -275,8 +277,14 @@ mod tests {
     fn toggle_press_starts_then_stops() {
         let m = HotkeyManager::with_modes(HotkeyMode::Toggle, HotkeyMode::Toggle);
         let t0 = Instant::now();
-        assert_eq!(m.handle_event(pressed(t0)), Some(HotkeyAction::StartRecording));
-        assert_eq!(m.handle_event(released(t0 + Duration::from_millis(100))), None);
+        assert_eq!(
+            m.handle_event(pressed(t0)),
+            Some(HotkeyAction::StartRecording)
+        );
+        assert_eq!(
+            m.handle_event(released(t0 + Duration::from_millis(100))),
+            None
+        );
         // Cooldown : second press doit etre ignore pendant 500ms.
         assert_eq!(
             m.handle_event(pressed(t0 + Duration::from_millis(300))),
@@ -303,7 +311,10 @@ mod tests {
     fn ptt_press_starts_release_stops() {
         let m = HotkeyManager::with_modes(HotkeyMode::PushToTalk, HotkeyMode::PushToTalk);
         let t0 = Instant::now();
-        assert_eq!(m.handle_event(pressed(t0)), Some(HotkeyAction::StartRecording));
+        assert_eq!(
+            m.handle_event(pressed(t0)),
+            Some(HotkeyAction::StartRecording)
+        );
         assert_eq!(
             m.handle_event(released(t0 + Duration::from_millis(200))),
             Some(HotkeyAction::StopRecording)
@@ -355,7 +366,10 @@ mod tests {
         let t0 = Instant::now();
         // Press secondary -> PTT start
         assert_eq!(
-            m.handle_event(HotkeyEvent::Pressed { slot: HotkeySlot::Secondary, timestamp: t0 }),
+            m.handle_event(HotkeyEvent::Pressed {
+                slot: HotkeySlot::Secondary,
+                timestamp: t0
+            }),
             Some(HotkeyAction::StartRecording)
         );
         // Release secondary apres 100ms -> PTT stop

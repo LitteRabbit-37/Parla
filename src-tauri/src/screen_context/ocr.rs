@@ -26,8 +26,8 @@ pub fn recognize_png(png: &[u8]) -> Result<String> {
     let stream = InMemoryRandomAccessStream::new()
         .map_err(|e| anyhow!("InMemoryRandomAccessStream: {e}"))?;
 
-    let writer = DataWriter::CreateDataWriter(&stream)
-        .map_err(|e| anyhow!("DataWriter create: {e}"))?;
+    let writer =
+        DataWriter::CreateDataWriter(&stream).map_err(|e| anyhow!("DataWriter create: {e}"))?;
     writer
         .WriteBytes(png)
         .map_err(|e| anyhow!("DataWriter WriteBytes: {e}"))?;
@@ -46,9 +46,7 @@ pub fn recognize_png(png: &[u8]) -> Result<String> {
         .map_err(|e| anyhow!("DataWriter DetachStream: {e}"))?;
 
     // Remet la position au debut pour le decoder.
-    stream
-        .Seek(0)
-        .map_err(|e| anyhow!("stream Seek: {e}"))?;
+    stream.Seek(0).map_err(|e| anyhow!("stream Seek: {e}"))?;
 
     let decoder = BitmapDecoder::CreateAsync(&stream)
         .map_err(|e| anyhow!("BitmapDecoder CreateAsync: {e}"))?
