@@ -631,7 +631,12 @@
     "noConfigs": "Sin configuracion definida. Cree un perfil para que Parla cambie automaticamente prompt + LLM + fuente segun la app activa.",
     "openPowerMode": "Abrir Modo Power",
     "autoSwitch": "Cambia automaticamente segun la aplicacion actual. Alt+numero para elegir un perfil manualmente.",
-    "escapeHint": "Pulsa Esc de nuevo para cancelar"
+    "escapeHint": "Pulsa Esc de nuevo para cancelar",
+    "selectMode": "Elegir un perfil",
+    "noModesAvailable": "Sin perfiles disponibles",
+    "startRecording": "Iniciar la grabacion",
+    "stopRecording": "Detener la grabacion",
+    "processing": "Procesando..."
   },
   "promptDetection": {
     "triggerDetected": "Palabra activadora detectada: {{word}}",

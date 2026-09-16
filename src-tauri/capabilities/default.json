@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capabilities pour la fenetre principale Parla",
-  "windows": ["main", "recorder"],
+  "windows": ["main", "recorder", "recorder-popover"],
   "permissions": [
     "core:default",
     "opener:default",

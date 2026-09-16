@@ -4,7 +4,7 @@
 // Components/RecorderComponents.swift + AudioVisualizerView.swift :
 //   VStack [LiveTranscriptView 56pt (pendant l'enregistrement, si texte)]
 //          [Divider]
-//          HStack [PromptButton 22pt] Spacer [StatusDisplay] Spacer [ModeButton 22pt]
+//          HStack [RecordButton 21pt] Spacer [StatusDisplay] Spacer [ModeButton 22pt]
 //   control bar 40pt epingle bas, background Color.black opaque,
 //   largeur 184 (compact) / 300 (texte en direct), corner radius 20 / 14.
 //   15 bars audio avec wave + center boost, 60 FPS.
@@ -13,29 +13,30 @@
 //   uniquement pendant recordingState == .recording (commit 42f7ec8).
 //   Astuce Echap : "Press Esc again to cancel" au premier Echap, une seule
 //   fois (RecorderPanelShortcutManager.showEscapeConfirmationHintIfNeeded).
+//
+// Boutons (VoiceInk 2.x) :
+//   - Gauche : RecorderRecordButton, cercle 21 pt gris au repos, rouge en
+//     enregistrement, translucide et inactif pendant le traitement. Clic =
+//     demarrer / arreter. Le selecteur de prompt de VoiceInk 1.x a ete retire
+//     de la bulle (commit d59dfde), le prompt est porte par le mode.
+//   - Droite : RecorderModeButton, popover ouvert au survol ou au clic,
+//     ferme 250 ms apres avoir quitte le bouton ET le popover
+//     (syncPopoverVisibility). Le popover est une fenetre separee
+//     (NSPopover chez VoiceInk, fenetre "recorder-popover" ici) : la bulle
+//     n'est plus redimensionnee.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { listen } from "@tauri-apps/api/event";
-import { Check, Settings as SettingsIcon, Sparkles } from "lucide-react";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
-  api,
-  type AudioMeter,
-  type CustomPrompt,
-  type PowerModeConfig,
-  type PowerSession,
-} from "@/lib/tauri";
-import { cn, powerShortcutLabel } from "@/lib/utils";
+import { emit, listen } from "@tauri-apps/api/event";
+import { LayoutGrid } from "lucide-react";
+import { api, type AudioMeter, type PowerModeConfig, type PowerSession } from "@/lib/tauri";
+import { cn } from "@/lib/utils";
 
-const COLLAPSED_HEIGHT = 120;
-const POPOVER_HEIGHT = 400;
 /// Duree d'affichage de l'astuce Echap = fenetre du double-Echap (1.5 s).
 const ESCAPE_HINT_MS = 1500;
+/// Delai de grace avant fermeture du popover (VoiceInk 0.25 s).
+const POPOVER_GRACE_MS = 250;
+const BARS = 15;
 
 type Stage = "idle" | "recording" | "transcribing" | "enhancing";
 
@@ -52,7 +53,7 @@ type StreamingEvent =
   | { kind: "committed"; text: string }
   | { kind: "error"; message: string };
 
-const BARS = 15;
+type PopoverHoverEvent = { hovering: boolean };
 
 export function MiniRecorderView() {
   const { t } = useTranslation();
@@ -66,71 +67,66 @@ export function MiniRecorderView() {
   const [showLiveTranscript, setShowLiveTranscript] = useState(true);
   const [escapeHint, setEscapeHint] = useState(false);
   const [powerSession, setPowerSession] = useState<PowerSession | null>(null);
-
-  // Power Mode / Prompts state (pour les popovers).
-  const [prompts, setPrompts] = useState<CustomPrompt[]>([]);
-  const [activePromptId, setActivePromptId] = useState<string | null>(null);
-  const [enhancementEnabled, setEnhancementEnabled] = useState(false);
   const [powerConfigs, setPowerConfigs] = useState<PowerModeConfig[]>([]);
   const [style, setStyle] = useState<"mini" | "notch">("mini");
 
-  // Active popover id. The mini recorder window is only 120 px tall, so a
-  // DOM popover has no room to render without being clipped. We track which
-  // popover is open and ask the Tauri backend to temporarily grow the window
-  // (keeping the pill anchored to its bottom or top edge). Restored when
-  // the popover closes.
-  //
-  // Open sequence :
-  //   1. User clicks button -> Radix asks onOpenChange(true).
-  //   2. We resize the OS window to 400 px BEFORE rendering the popover
-  //      content, wait a frame for layout, then flip our state open=true.
-  //      Radix then measures the (now-larger) window and places the
-  //      content without flashing in the clipped area.
-  //   3. On close, we let Radix render the close animation, then shrink
-  //      the window back.
-  const [popoverOpen, setPopoverOpen] = useState<"prompt" | "power" | null>(
-    null,
-  );
-  const handlePopoverChange = useCallback(
-    (id: "prompt" | "power") => async (open: boolean) => {
-      if (open) {
-        await api.resizeRecorderWindow(POPOVER_HEIGHT).catch(console.error);
-        // One frame so the OS actually repaints the new window size before
-        // Radix positions the PopoverContent against the trigger.
-        await new Promise((r) => setTimeout(r, 32));
-        setPopoverOpen(id);
-      } else {
-        setPopoverOpen(null);
-        await api
-          .resizeRecorderWindow(COLLAPSED_HEIGHT)
-          .catch(console.error);
-      }
-    },
-    [],
-  );
-  // Helper the PowerMode popover calls when the user clicks "Ouvrir
-  // Power Mode" - closes the popover + resizes back so we don't leave
-  // an inflated invisible window.
-  const closePopover = useCallback(async () => {
-    setPopoverOpen(null);
-    await api.resizeRecorderWindow(COLLAPSED_HEIGHT).catch(console.error);
+  // Popover Mode : survol du bouton (cette fenetre) + survol du popover
+  // (remonte par l'autre fenetre via "recorder:popover-hover").
+  const [hoverButton, setHoverButton] = useState(false);
+  const [hoverPopover, setHoverPopover] = useState(false);
+  const popoverOpenRef = useRef(false);
+  const closeTimerRef = useRef<number | null>(null);
+  const modeButtonRef = useRef<HTMLButtonElement>(null);
+  const pillRef = useRef<HTMLDivElement>(null);
+
+  const openPopover = useCallback(async () => {
+    const btn = modeButtonRef.current;
+    const pill = pillRef.current;
+    if (!btn || !pill) return;
+    const b = btn.getBoundingClientRect();
+    const p = pill.getBoundingClientRect();
+    popoverOpenRef.current = true;
+    try {
+      await emit("recorder:popover-refresh", {});
+      await api.openRecorderPopover(b.left + b.width / 2, p.top, p.bottom);
+    } catch (e) {
+      console.error(e);
+    }
   }, []);
+
+  const closePopover = useCallback(() => {
+    popoverOpenRef.current = false;
+    api.closeRecorderPopover().catch(console.error);
+  }, []);
+
+  const wantPopover = hoverButton || hoverPopover;
+  useEffect(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    if (wantPopover) {
+      if (!popoverOpenRef.current) openPopover();
+    } else if (popoverOpenRef.current) {
+      closeTimerRef.current = window.setTimeout(closePopover, POPOVER_GRACE_MS);
+    }
+    return () => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+      }
+    };
+  }, [wantPopover, openPopover, closePopover]);
 
   useEffect(() => {
     // Charge une fois au mount - la fenetre mini-recorder est recreee a
     // chaque start donc pas besoin de re-fetch frequent.
     Promise.all([
-      api.listPrompts(),
-      api.getActivePromptId(),
-      api.getEnhancementEnabled(),
       api.listPowerConfigs(),
       api.getRecorderStyle(),
       api.getShowLiveTranscript(),
     ])
-      .then(([ps, aid, en, pcs, rs, live]) => {
-        setPrompts(ps);
-        setActivePromptId(aid);
-        setEnhancementEnabled(en);
+      .then(([pcs, rs, live]) => {
         setPowerConfigs(pcs);
         setStyle(rs === "notch" ? "notch" : "mini");
         setShowLiveTranscript(live);
@@ -165,6 +161,9 @@ export function MiniRecorderView() {
       listen<PowerSession | null>("power_mode:active", (e) => {
         setPowerSession(e.payload);
       }),
+      listen<PopoverHoverEvent>("recorder:popover-hover", (e) => {
+        setHoverPopover(!!e.payload?.hovering);
+      }),
     ];
     return () => {
       if (hintTimer !== null) window.clearTimeout(hintTimer);
@@ -196,6 +195,7 @@ export function MiniRecorderView() {
     showLiveTranscript && stage === "recording" && liveText.trim().length > 0;
   const expanded = hasLiveText;
   const isNotch = style === "notch";
+  const hasEnabledConfigs = powerConfigs.some((c) => c.is_enabled);
 
   // Notch : content aligne en haut, pill qui descend du bord superieur
   // avec top-flat + bottom-rounded (VoiceInk NotchShape). Mini : content
@@ -220,6 +220,7 @@ export function MiniRecorderView() {
       )}
     >
       <div
+        ref={pillRef}
         className={cn(
           "flex flex-col bg-black text-white shadow-lg transition-all duration-300 ease-in-out",
           expanded ? "w-[300px]" : "w-[184px]",
@@ -234,62 +235,52 @@ export function MiniRecorderView() {
           </>
         )}
         <div className="flex h-10 items-center">
-        <RecorderPromptButton
-          open={popoverOpen === "prompt"}
-          onOpenChange={handlePopoverChange("prompt")}
-          popoverSide={isNotch ? "bottom" : "top"}
-          enabled={enhancementEnabled}
-          prompts={prompts}
-          activeId={activePromptId}
-          onToggleEnhancement={async () => {
-            const next = !enhancementEnabled;
-            setEnhancementEnabled(next);
-            try {
-              await api.setEnhancementEnabled(next);
-            } catch (e) {
-              console.error(e);
-            }
-          }}
-          onSelectPrompt={async (id) => {
-            setActivePromptId(id);
-            try {
-              await api.setActivePromptId(id);
-              if (!enhancementEnabled) {
-                setEnhancementEnabled(true);
-                await api.setEnhancementEnabled(true);
-              }
-            } catch (e) {
-              console.error(e);
-            }
-          }}
-        />
+          <RecorderRecordButton
+            stage={stage}
+            onClick={() => api.toggleRecordingFromUi().catch(console.error)}
+          />
 
-        <div className="flex flex-1 items-center justify-center overflow-hidden px-1">
-          {stage === "recording" && escapeHint && (
-            <span className="truncate text-[11px] font-medium text-white/90">
-              {t("miniRecorder.escapeHint")}
-            </span>
-          )}
-          {stage === "recording" && !escapeHint && (
-            <AudioVisualizer meterDb={meterDb} />
-          )}
-          {stage === "transcribing" && (
-            <ProcessingStatusDisplay label="Transcribing" intervalMs={180} />
-          )}
-          {stage === "enhancing" && (
-            <ProcessingStatusDisplay label="Enhancing" intervalMs={220} />
-          )}
-          {stage === "idle" && <StaticVisualizer />}
-        </div>
+          <div className="flex flex-1 items-center justify-center overflow-hidden px-1">
+            {stage === "recording" && escapeHint && (
+              <span className="truncate text-[11px] font-medium text-white/90">
+                {t("miniRecorder.escapeHint")}
+              </span>
+            )}
+            {stage === "recording" && !escapeHint && (
+              <AudioVisualizer meterDb={meterDb} />
+            )}
+            {stage === "transcribing" && (
+              <ProcessingStatusDisplay label="Transcribing" intervalMs={180} />
+            )}
+            {stage === "enhancing" && (
+              <ProcessingStatusDisplay label="Enhancing" intervalMs={220} />
+            )}
+            {stage === "idle" && <StaticVisualizer />}
+          </div>
 
-        <RecorderPowerModeButton
-          open={popoverOpen === "power"}
-          onOpenChange={handlePopoverChange("power")}
-          popoverSide={isNotch ? "bottom" : "top"}
-          onClosePopover={closePopover}
-          session={powerSession}
-          configs={powerConfigs}
-        />
+          <button
+            ref={modeButtonRef}
+            type="button"
+            onMouseEnter={() => setHoverButton(true)}
+            onMouseLeave={() => setHoverButton(false)}
+            onClick={() => {
+              if (popoverOpenRef.current) closePopover();
+              else openPopover();
+            }}
+            title={powerSession?.config_name ?? t("miniRecorder.powerMode")}
+            className={cn(
+              "mr-3 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full transition-colors hover:bg-white/10",
+              !hasEnabledConfigs && "opacity-60",
+            )}
+          >
+            {powerSession ? (
+              <span className="text-[14px] leading-none">{powerSession.emoji}</span>
+            ) : (
+              // VoiceInk : icone "square.grid.2x2" tant qu'aucun mode n'est
+              // effectif.
+              <LayoutGrid className="h-3.5 w-3.5 text-white/85" />
+            )}
+          </button>
         </div>
         {hasLiveText && isNotch && (
           <>
@@ -302,211 +293,64 @@ export function MiniRecorderView() {
   );
 }
 
-// -- PromptButton (gauche) --------------------------------------------------
+// -- RecordButton (gauche) : VoiceInk RecorderRecordButton -----------------
 
-function RecorderPromptButton({
-  open,
-  onOpenChange,
-  popoverSide,
-  enabled,
-  prompts,
-  activeId,
-  onToggleEnhancement,
-  onSelectPrompt,
+const RECORD_COLORS = {
+  ready: { surface: "#4D4D52", border: "#6B6B70", mark: "#C7C7CC" },
+  recording: {
+    surface: "rgba(229, 72, 77, 0.92)",
+    border: "rgba(229, 72, 77, 0.98)",
+    mark: "#FFFFFF",
+  },
+  processing: {
+    surface: "rgba(255, 255, 255, 0.13)",
+    border: "rgba(255, 255, 255, 0.18)",
+    mark: "rgba(255, 255, 255, 0.86)",
+  },
+} as const;
+
+function RecorderRecordButton({
+  stage,
+  onClick,
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  popoverSide: "top" | "bottom";
-  enabled: boolean;
-  prompts: CustomPrompt[];
-  activeId: string | null;
-  onToggleEnhancement: () => void;
-  onSelectPrompt: (id: string) => void;
+  stage: Stage;
+  onClick: () => void;
 }) {
   const { t } = useTranslation();
+  const visual =
+    stage === "recording" ? "recording" : stage === "idle" ? "ready" : "processing";
+  const colors = RECORD_COLORS[visual];
+  const disabled = visual === "processing";
+  const title =
+    visual === "recording"
+      ? t("miniRecorder.stopRecording")
+      : visual === "ready"
+        ? t("miniRecorder.startRecording")
+        : t("miniRecorder.processing");
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger asChild>
-        <button
-          className={cn(
-            "ml-3 flex h-[22px] w-[22px] items-center justify-center rounded-full transition-colors hover:bg-white/10",
-            !enabled && "opacity-60",
-          )}
-          title={
-            enabled
-              ? t("miniRecorder.promptActive")
-              : t("miniRecorder.enhancementDisabled")
-          }
-          onDoubleClick={onToggleEnhancement}
-        >
-          <Sparkles className="h-3 w-3 text-white" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        side={popoverSide}
-        sideOffset={8}
-        className="w-64 max-h-[320px] overflow-auto p-2"
-      >
-        <div className="grid gap-1">
-          <button
-            type="button"
-            onClick={onToggleEnhancement}
-            className={cn(
-              "flex items-center justify-between rounded px-2 py-1.5 text-left text-xs hover:bg-accent",
-              enabled && "bg-accent",
-            )}
-          >
-            <span className="font-medium">{t("miniRecorder.enhancementLlm")}</span>
-            <span className="text-[10px] text-muted-foreground">
-              {enabled ? t("miniRecorder.active") : t("miniRecorder.off")}
-            </span>
-          </button>
-          <div className="h-px bg-border" />
-          {prompts.length === 0 && (
-            <p className="px-2 py-1 text-xs text-muted-foreground">
-              {t("miniRecorder.noPrompts")}
-            </p>
-          )}
-          {prompts.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => onSelectPrompt(p.id)}
-              className={cn(
-                "flex items-center justify-between rounded px-2 py-1.5 text-left text-xs hover:bg-accent",
-                p.id === activeId && "bg-accent",
-              )}
-            >
-              <span className="truncate">{p.title}</span>
-              {p.id === activeId && <Check className="h-3 w-3" />}
-            </button>
-          ))}
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-// -- PowerModeButton (droite) ----------------------------------------------
-
-function RecorderPowerModeButton({
-  open,
-  onOpenChange,
-  popoverSide,
-  onClosePopover,
-  session,
-  configs,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  popoverSide: "top" | "bottom";
-  onClosePopover: () => void;
-  session: PowerSession | null;
-  configs: PowerModeConfig[];
-}) {
-  const { t } = useTranslation();
-  const hasSession = !!session;
-  const isEmpty = configs.length === 0;
-  return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger asChild>
-        <button
-          className={cn(
-            "mr-3 flex h-[22px] w-[22px] items-center justify-center rounded-full transition-colors hover:bg-white/10",
-            isEmpty && "opacity-60",
-          )}
-          title={session?.config_name ?? t("miniRecorder.powerMode")}
-        >
-          {hasSession ? (
-            <span className="text-[14px] leading-none">{session.emoji}</span>
-          ) : (
-            // VoiceInk-style idle indicator : small dot. Colored green
-            // when at least one profile is configured (just not active
-            // right now), muted gray when no profiles exist.
-            <span
-              className={cn(
-                "h-[6px] w-[6px] rounded-full",
-                isEmpty ? "bg-white/40" : "bg-emerald-400",
-              )}
-            />
-          )}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        side={popoverSide}
-        sideOffset={8}
-        className="w-64 max-h-[320px] overflow-auto p-2"
-      >
-        <div className="grid gap-1">
-          {isEmpty ? (
-            <div className="px-2 py-2 text-xs">
-              <p className="mb-1 font-medium">{t("miniRecorder.powerMode")}</p>
-              <p className="text-muted-foreground">
-                {t("miniRecorder.noConfigs")}
-              </p>
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    await api.showMainWindow("powermode");
-                    onClosePopover();
-                  } catch (e) {
-                    console.error(e);
-                  }
-                }}
-                className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-accent px-2 py-1 text-[11px] font-medium hover:bg-accent/80"
-              >
-                <SettingsIcon className="h-3 w-3" />
-                {t("miniRecorder.openPowerMode")}
-              </button>
-            </div>
-          ) : (
-            <>
-              {configs.map((c) => {
-                // Meme mapping que le backend : le raccourci cible le Nieme
-                // profil ACTIVE dans l'ordre stocke.
-                const enabledIdx = c.is_enabled
-                  ? configs.filter((x) => x.is_enabled).indexOf(c)
-                  : -1;
-                const shortcut = powerShortcutLabel(enabledIdx);
-                const isActive = c.id === session?.config_id;
-                return (
-                  <div
-                    key={c.id}
-                    className={cn(
-                      "flex items-center gap-2 rounded px-2 py-1.5 text-xs",
-                      isActive && "bg-accent",
-                      !c.is_enabled && "opacity-50",
-                    )}
-                  >
-                    <span className="text-lg leading-none">{c.emoji}</span>
-                    <span className="flex-1 truncate">{c.name}</span>
-                    {shortcut && (
-                      <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-[9px] font-medium text-muted-foreground">
-                        {shortcut}
-                      </kbd>
-                    )}
-                    {isActive && <Check className="h-3 w-3" />}
-                  </div>
-                );
-              })}
-              <p className="mt-1 px-2 text-[10px] text-muted-foreground">
-                {t("miniRecorder.autoSwitch")}
-              </p>
-            </>
-          )}
-        </div>
-      </PopoverContent>
-    </Popover>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="ml-2.5 flex h-[21px] w-[21px] shrink-0 items-center justify-center rounded-full transition-colors duration-150 disabled:cursor-default"
+      style={{
+        background: colors.surface,
+        boxShadow: `inset 0 0 0 0.6px ${colors.border}`,
+      }}
+    >
+      <span
+        className="block h-[7px] w-[7px] rounded-[2.2px]"
+        style={{ background: colors.mark }}
+      />
+    </button>
   );
 }
 
 // -- Audio visualizer (15 bars, wave + center boost) -----------------------
 
 function AudioVisualizer({ meterDb }: { meterDb: number }) {
-  // Normalisation -60dB..0dB -> 0..1 (aligne VoiceInk Recorder.swift L218+)
+  // Normalisation -60dB..0dB -> 0..1 (aligne VoiceInk Recorder.swift)
   const power = normalizePower(meterDb);
   // Curve perceptuelle ^0.7 (VoiceInk AudioVisualizerView amplitude clamp).
   const amplitude = Math.pow(power, 0.7);

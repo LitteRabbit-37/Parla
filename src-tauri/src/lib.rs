@@ -34,7 +34,7 @@ use commands::models::{
 };
 use commands::recording::{
     cancel_recording, get_audio_meter, is_recording, list_audio_devices, start_recording,
-    stop_recording, RecorderState,
+    stop_recording, toggle_recording_from_ui, RecorderState,
 };
 use commands::streaming::{StreamingRegistryState, StreamingSessionState};
 use commands::settings::{
@@ -76,8 +76,8 @@ use commands::permissions::{
 };
 use commands::power_mode::{
     add_power_config, delete_power_config, get_active_power_session, get_power_auto_restore,
-    list_power_configs, power_mode_preview, reorder_power_configs, set_power_auto_restore,
-    update_power_config,
+    list_power_configs, power_mode_preview, reorder_power_configs, select_power_config,
+    set_power_auto_restore, update_power_config,
 };
 use commands::history::{
     count_history, delete_history_item, export_history_csv, get_history_item,
@@ -295,6 +295,7 @@ pub fn run() {
             cancel_recording,
             get_audio_meter,
             is_recording,
+            toggle_recording_from_ui,
             list_whisper_models,
             download_whisper_model,
             cancel_download_whisper_model,
@@ -319,7 +320,8 @@ pub fn run() {
             set_audio_resumption_delay,
             get_sound_feedback_enabled,
             set_sound_feedback_enabled,
-            mini_recorder::resize_recorder_window,
+            mini_recorder::open_recorder_popover,
+            mini_recorder::close_recorder_popover,
             mini_recorder::show_main_window,
             list_word_replacements,
             add_word_replacement,
@@ -385,6 +387,7 @@ pub fn run() {
             get_power_auto_restore,
             set_power_auto_restore,
             get_active_power_session,
+            select_power_config,
             power_mode_preview,
             get_screen_context_enabled,
             set_screen_context_enabled,

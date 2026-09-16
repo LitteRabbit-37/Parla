@@ -350,10 +350,15 @@ export const api = {
   getSoundFeedbackEnabled: () => invoke<boolean>("get_sound_feedback_enabled"),
   setSoundFeedbackEnabled: (enabled: boolean) =>
     invoke<void>("set_sound_feedback_enabled", { enabled }),
-  resizeRecorderWindow: (height: number) =>
-    invoke<void>("resize_recorder_window", { height }),
   showMainWindow: (panel?: string | null) =>
     invoke<void>("show_main_window", { panel: panel ?? null }),
+  // Popover du bouton Mode de la bulle (fenetre separee). Ancres en px
+  // logiques relatifs a la fenetre recorder.
+  openRecorderPopover: (anchorX: number, anchorTop: number, anchorBottom: number) =>
+    invoke<void>("open_recorder_popover", { anchorX, anchorTop, anchorBottom }),
+  closeRecorderPopover: () => invoke<void>("close_recorder_popover"),
+  // Bouton d'enregistrement de la bulle : meme cycle que le raccourci.
+  toggleRecordingFromUi: () => invoke<void>("toggle_recording_from_ui"),
 
   listCloudProviders: () =>
     invoke<
@@ -513,6 +518,8 @@ export const api = {
   getPowerAutoRestore: () => invoke<boolean>("get_power_auto_restore"),
   setPowerAutoRestore: (enabled: boolean) =>
     invoke<void>("set_power_auto_restore", { enabled }),
+  selectPowerConfig: (id: string) =>
+    invoke<void>("select_power_config", { id }),
   getActivePowerSession: () =>
     invoke<PowerSession | null>("get_active_power_session"),
   powerModePreview: () => invoke<DetectionPreview>("power_mode_preview"),

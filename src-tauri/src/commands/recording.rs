@@ -86,6 +86,13 @@ pub fn is_recording(state: State<'_, RecorderState>) -> bool {
     state.0.lock().is_some()
 }
 
+/// Bouton d'enregistrement de la bulle (VoiceInk RecorderRecordButton) :
+/// meme cycle complet que le raccourci et le menu tray.
+#[tauri::command]
+pub fn toggle_recording_from_ui(app: AppHandle) {
+    crate::transcription::engine::toggle_from_ui(&app);
+}
+
 // ============================================================================
 // Helpers reutilisables (hotkey manager, etc.)
 // ============================================================================
