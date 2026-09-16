@@ -38,7 +38,7 @@
 - **Privacy-first by default** - you can run the whole pipeline (transcription + LLM enhancement) 100% offline.
 - **Power Mode** - detects the foreground window and browser URL, then applies a pre-configured profile (which model, which LLM prompt, which dictionary) automatically.
 - **Context aware** - the foreground window is captured + OCRed, and the extracted text is injected into the LLM enhancement prompt so the output matches what you were working on.
-- **Global shortcuts** with configurable toggle, push-to-talk or hybrid mode, plus a double-Escape to cancel a recording.
+- **Global shortcuts** with configurable toggle, push-to-talk or hybrid mode, a double-Escape (or custom shortcut) to cancel a recording, plus additional shortcuts to copy, paste or retry the last transcription and open the history. The tray menu shows them next to each action.
 - **Personal dictionary** of word replacements applied on every transcription (technical terms, product names, custom acronyms).
 - **Prompt detection** via trigger words in your transcript - say "mail ..." and the Email prompt kicks in automatically.
 - **Multilingual UI** - French, English, Spanish.
@@ -50,7 +50,7 @@
 Compared to existing Windows dictation tools, Parla targets feature parity with VoiceInk on macOS:
 
 - **Accurate transcription** with local (Whisper / Parakeet) or cloud (Groq, Deepgram, ElevenLabs, Mistral, Soniox, Speechmatics, Gemini, Custom OpenAI-compat) models.
-- **Streaming transcription** for providers that support it (ElevenLabs Scribe v2, Deepgram nova-3, Mistral voxtral RT, Soniox stt-rt-v4, Speechmatics).
+- **Streaming transcription** for providers that support it (ElevenLabs Scribe v2, Deepgram nova-3, Mistral voxtral RT, Soniox stt-rt-v4, Speechmatics, AssemblyAI, Cartesia, xAI), with the text shown live in the recorder pill while you speak.
 - **LLM enhancement** with an embedded llama.cpp (GGUF models with CUDA), Ollama local, plus all major cloud providers (Anthropic, OpenAI, Gemini, Mistral, Groq, Cerebras, OpenRouter) and local CLI templates (pi / claude / codex) or a custom PowerShell command.
 - **Smart modes** (prompts) configurable per-profile: Default cleanup, Assistant, Email, Chat, Rewrite, or any custom prompt you define.
 - **Multi-format clipboard backup** - if you had an image, a file, or rich text in your clipboard, it is restored byte-for-byte after paste.

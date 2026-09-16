@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-16
+
 Feature release catching up with VoiceInk 2.x on shortcuts and the recorder
 pill: additional global shortcuts including "paste last transcription"
 (issue #11), a tray menu that shows the configured shortcuts, live text in
