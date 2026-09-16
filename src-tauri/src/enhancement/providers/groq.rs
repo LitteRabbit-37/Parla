@@ -12,11 +12,8 @@ use super::openai_compat;
 
 pub struct GroqProvider;
 
+// VoiceInk 2.13 AIService.availableModels (.groq).
 const MODELS: &[&str] = &[
-    "llama-3.1-8b-instant",
-    "llama-3.3-70b-versatile",
-    "moonshotai/kimi-k2-instruct-0905",
-    "qwen/qwen3-32b",
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
 ];

@@ -174,7 +174,10 @@
     "textFormatting": "Formato de texto",
     "textFormattingDescription": "Aplica mayusculas iniciales, puntuacion y limpieza.",
     "removeFillers": "Eliminar muletillas",
-    "fillerList": "Lista de muletillas (separadas por comas)"
+    "fillerList": "Lista de muletillas (separadas por comas)",
+    "liveTranscript": "Texto en vivo",
+    "liveTranscriptInfo": "Muestra el texto en vivo durante la grabacion con modelos en tiempo real (proveedores cloud en streaming).",
+    "liveTranscriptDescription": "La burbuja de grabacion muestra el texto a medida que hablas."
   },
   "onboarding": {
     "welcome": {
@@ -397,7 +400,8 @@
     "keySavedOk": "OK, clave guardada",
     "keyDeleted": "Clave eliminada",
     "activePrompt": "Prompt activo",
-    "predefined": "(predefinido)"
+    "predefined": "(predefinido)",
+    "currentModel": "{{model}} (actual)"
   },
   "screenContext": {
     "title": "Contexto de ventana activa (OCR)",
@@ -513,7 +517,8 @@
       "toggle": "Alternar",
       "pushToTalk": "Push-to-talk",
       "hybrid": "Hibrido"
-    }
+    },
+    "systemDefault": "Predeterminado del sistema"
   },
   "transcribe": {
     "title": "Transcripcion local",
@@ -625,7 +630,8 @@
     "powerMode": "Modo Power",
     "noConfigs": "Sin configuracion definida. Cree un perfil para que Parla cambie automaticamente prompt + LLM + fuente segun la app activa.",
     "openPowerMode": "Abrir Modo Power",
-    "autoSwitch": "Cambia automaticamente segun la aplicacion actual. Alt+numero para elegir un perfil manualmente."
+    "autoSwitch": "Cambia automaticamente segun la aplicacion actual. Alt+numero para elegir un perfil manualmente.",
+    "escapeHint": "Pulsa Esc de nuevo para cancelar"
   },
   "promptDetection": {
     "triggerDetected": "Palabra activadora detectada: {{word}}",
@@ -640,7 +646,14 @@
     "noWhisper": "Ningun modelo Whisper seleccionado. Abre Modelos IA y elige uno.",
     "noParakeet": "Ningun modelo Parakeet seleccionado. Abre Modelos IA y elige uno.",
     "parakeetIncomplete": "El modelo Parakeet {{model}} esta incompleto. Vuelve a descargarlo desde Modelos IA.",
-    "cloudUnconfigured": "Ningun proveedor de nube o modelo seleccionado. Abre Modelos IA y configura uno."
+    "cloudUnconfigured": "Ningun proveedor de nube o modelo seleccionado. Abre Modelos IA y configura uno.",
+    "shortcutConflict": "Atajo ya utilizado por {{b}} ({{a}}).",
+    "shortcutReserved": "Alt+numero esta reservado a los perfiles de Power Mode durante la grabacion ({{action}}).",
+    "shortcutNeedsModifier": "Esta tecla necesita un modificador (Ctrl, Alt, Shift o Win) ({{action}}).",
+    "historyEmpty": "El historial esta vacio.",
+    "lastTranscriptionEmpty": "La ultima transcripcion esta vacia.",
+    "audioMissing": "No se puede reintentar: falta el archivo de audio de la ultima transcripcion.",
+    "recordingInProgress": "Hay una grabacion en curso."
   },
   "prompts": {
     "default": {
@@ -688,6 +701,38 @@
       "waiting": "Pulsa tu combinacion...",
       "needsModifier": "Una tecla sola solo se admite para F1-F24, Insert, Delete, Home, End, PageUp/Down, Pause, PrintScreen. Si no, agrega Ctrl, Alt, Shift o Win."
     },
-    "editCombo": "Clic para cambiar la combinacion"
+    "editCombo": "Clic para cambiar la combinacion",
+    "additional": {
+      "cardTitle": "Atajos adicionales",
+      "cardDescription": "Atajos globales para la ultima transcripcion y para cancelar una grabacion. Sin definir por defecto.",
+      "copyLast": "Copiar la ultima transcripcion",
+      "copyLastHint": "Copia la ultima transcripcion (texto mejorado si existe) al portapapeles. Tambien disponible en el menu del icono.",
+      "pasteLast": "Pegar la ultima transcripcion (original)",
+      "pasteLastEnhanced": "Pegar la ultima transcripcion (mejorada)",
+      "retryLast": "Reintentar la ultima transcripcion",
+      "retryLastHint": "Vuelve a transcribir la ultima grabacion con el modelo y la mejora actuales, copia el resultado al portapapeles y lo agrega al historial.",
+      "openHistory": "Abrir el historial",
+      "cancelRecording": "Cancelar la grabacion",
+      "cancelHint": "El atajo asignado cancela la grabacion. Restablecer vuelve al doble Esc por defecto.",
+      "cancelDefault": "Esc, Esc",
+      "notSet": "Sin definir",
+      "record": "Grabar un atajo",
+      "clear": "Borrar",
+      "reset": "Restablecer",
+      "actionNames": {
+        "primary": "Atajo de grabacion principal",
+        "secondary": "Atajo de grabacion secundario",
+        "cancelRecording": "Cancelar la grabacion",
+        "copyLast": "Copiar la ultima transcripcion",
+        "pasteLast": "Pegar la ultima transcripcion (original)",
+        "pasteLastEnhanced": "Pegar la ultima transcripcion (mejorada)",
+        "retryLast": "Reintentar la ultima transcripcion",
+        "openHistory": "Abrir el historial"
+      }
+    }
+  },
+  "cloudTimeout": {
+    "title": "Tiempo de espera de transcripcion cloud",
+    "description": "Tiempo maximo de espera de la respuesta del proveedor cloud. 30 segundos por defecto."
   }
 }

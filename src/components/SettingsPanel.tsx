@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { listen } from "@tauri-apps/api/event";
 import {
   Card,
   CardContent,
@@ -15,6 +16,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { AdditionalShortcutsCard } from "@/components/AdditionalShortcutsCard";
 import { HotkeyCard } from "@/components/HotkeyCard";
 import { InfoTip } from "@/components/ui/info-tip";
 import {
@@ -33,6 +35,7 @@ export function SettingsPanel() {
   const [systemMute, setSystemMute] = useState(false);
   const [resumeDelay, setResumeDelay] = useState(0.2);
   const [soundFeedback, setSoundFeedback] = useState(true);
+  const [showLiveTranscript, setShowLiveTranscript] = useState(true);
 
   useEffect(() => {
     api
@@ -47,7 +50,25 @@ export function SettingsPanel() {
     api.getSystemMuteEnabled().then(setSystemMute).catch(console.error);
     api.getAudioResumptionDelay().then(setResumeDelay).catch(console.error);
     api.getSoundFeedbackEnabled().then(setSoundFeedback).catch(console.error);
+    api.getShowLiveTranscript().then(setShowLiveTranscript).catch(console.error);
+    // La case "Lancer au demarrage" du menu tray modifie le meme reglage.
+    const un = listen<boolean>("settings:autostart-changed", (e) => {
+      setAutostart(e.payload);
+    });
+    return () => {
+      un.then((fn) => fn());
+    };
   }, []);
+
+  async function toggleShowLiveTranscript(next: boolean) {
+    setShowLiveTranscript(next);
+    try {
+      await api.setShowLiveTranscript(next);
+    } catch (e) {
+      console.error(e);
+      setShowLiveTranscript(!next);
+    }
+  }
 
   async function changeStyle(next: "mini" | "notch") {
     setRecorderStyle(next);
@@ -183,6 +204,8 @@ export function SettingsPanel() {
 
       <HotkeyCard />
 
+      <AdditionalShortcutsCard />
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">{t("settings.recording")}</CardTitle>
@@ -275,7 +298,7 @@ export function SettingsPanel() {
             {t("settings.recorderStyleDescription")}
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-2">
+        <CardContent className="space-y-3">
           <div className="grid grid-cols-2 gap-2">
             <StyleTile
               active={recorderStyle === "mini"}
@@ -292,6 +315,24 @@ export function SettingsPanel() {
               orientation="top"
             />
           </div>
+
+          <label className="flex items-center justify-between rounded-md border p-3">
+            <div>
+              <div className="flex items-center gap-1.5">
+                <p className="text-sm font-medium">{t("settings.liveTranscript")}</p>
+                <InfoTip>{t("settings.liveTranscriptInfo")}</InfoTip>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {t("settings.liveTranscriptDescription")}
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={showLiveTranscript}
+              onChange={(e) => toggleShowLiveTranscript(e.target.checked)}
+              className="h-5 w-5"
+            />
+          </label>
         </CardContent>
       </Card>
     </div>

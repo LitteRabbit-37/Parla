@@ -1,12 +1,20 @@
 // Manager hotkey - machine a etats qui orchestre la relation touche -> action.
 //
-// Reference VoiceInk : VoiceInk/HotkeyManager.swift L382-437 processKeyPress.
+// Reference VoiceInk :
+// - Features/Shortcuts/Coordination/RecordingShortcutManager.swift
+//   (RecordingShortcutModeHandler : toggle / pushToTalk / hybrid, seuil
+//   hybride 0.5 s, cooldown 0.5 s).
+// - Features/Shortcuts/Coordination/RecorderPanelShortcutManager.swift
+//   (double-Echap 1.5 s, astuce "Press Esc again to cancel" affichee une
+//   seule fois, raccourci d'annulation personnalise qui remplace le
+//   double-Echap quand il est configure).
 //
 // Modes :
 //  - Toggle      : tap ou hold -> toggle recorder.
 //  - PushToTalk  : down -> start, up -> stop.
 //  - Hybrid      : si press > 500 ms : PTT (stop au release). Si tap court : toggle on + hands-free.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -14,13 +22,13 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
-use super::keyboard_hook::{HotkeyEvent, HotkeySlot};
+use super::keyboard_hook::{HotkeyEvent, HotkeySlot, UtilityAction};
 
-/// Seuil exact VoiceInk L92 : 0.5 s.
+/// Seuil exact VoiceInk `hybridPressThreshold` : 0.5 s.
 const HYBRID_PRESS_THRESHOLD: Duration = Duration::from_millis(500);
-/// Cooldown anti-rebond apres une action, VoiceInk L89-90.
+/// Cooldown anti-rebond apres une action, VoiceInk `shortcutPressCooldown`.
 const ACTION_COOLDOWN: Duration = Duration::from_millis(500);
-/// Fenetre pour double-tap Escape (VoiceInk MiniRecorderShortcutManager L43).
+/// Fenetre pour double-tap Escape (VoiceInk `escapeDoublePressThreshold`).
 const ESC_DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(1500);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,6 +55,12 @@ pub enum HotkeyAction {
     EnterHandsFree,
     /// Selection directe du Nieme profil Power Mode active (Alt+chiffre).
     SelectPowerMode(usize),
+    /// Premier Echap pendant un enregistrement : l'UI peut afficher
+    /// "Appuyez encore sur Echap pour annuler" (VoiceInk
+    /// showEscapeConfirmationHintIfNeeded). Aucun effet sur l'enregistrement.
+    EscapeHint,
+    /// Raccourci utilitaire global (copier / coller / reessayer / historique).
+    Utility(UtilityAction),
 }
 
 #[derive(Default)]
@@ -64,6 +78,11 @@ pub struct HotkeyManager {
     /// modifiable a chaud quand l'utilisateur change la config dans
     /// Settings sans avoir a recreer le manager.
     modes: Mutex<HotkeyModes>,
+    /// Vrai quand un raccourci d'annulation personnalise est configure :
+    /// le double-Echap est alors desactive (VoiceInk : `.recorderPanelEscape`
+    /// n'est enregistre que si `ShortcutStore.shortcut(for: .cancelRecorder)`
+    /// est nil).
+    custom_cancel: AtomicBool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -80,6 +99,7 @@ impl HotkeyManager {
                 primary: mode_primary,
                 secondary: mode_secondary,
             }),
+            custom_cancel: AtomicBool::new(false),
         }
     }
 
@@ -89,6 +109,15 @@ impl HotkeyManager {
         g.secondary = secondary;
     }
 
+    /// Active / desactive le double-Echap selon qu'un raccourci
+    /// d'annulation personnalise est configure.
+    pub fn set_custom_cancel(&self, enabled: bool) {
+        self.custom_cancel.store(enabled, Ordering::Relaxed);
+        if enabled {
+            self.state.lock().esc_first_press_at = None;
+        }
+    }
+
     /// Notifie le manager que l'enregistrement a reellement demarre ou s'est arrete.
     pub fn mark_recording_state(&self, recording: bool) {
         let mut state = self.state.lock();
@@ -96,7 +125,24 @@ impl HotkeyManager {
         if !recording {
             state.is_hands_free = false;
             state.key_down_since = None;
+            state.esc_first_press_at = None;
         }
+    }
+
+    /// Un enregistrement a ete demarre hors hotkey (menu tray, UI). Il est
+    /// par construction hands-free : la prochaine pression du raccourci
+    /// principal doit l'arreter, comme apres un tap court en mode hybride.
+    pub fn mark_started_externally(&self) {
+        let mut state = self.state.lock();
+        state.is_recording = true;
+        state.is_hands_free = true;
+        state.key_down_since = None;
+    }
+
+    /// Vrai si le manager considere un enregistrement en cours.
+    #[cfg(test)]
+    pub fn is_recording(&self) -> bool {
+        self.state.lock().is_recording
     }
 
     /// Transforme un evenement hook en action metier. None si rien a faire.
@@ -111,6 +157,10 @@ impl HotkeyManager {
             HotkeyEvent::SelectPowerMode { index } => {
                 Some(HotkeyAction::SelectPowerMode(index))
             }
+            // Raccourcis utilitaires : pass-through, independants de l'etat
+            // d'enregistrement (VoiceInk handleGlobalShortcut au keyUp).
+            HotkeyEvent::Utility { action } => Some(HotkeyAction::Utility(action)),
+            HotkeyEvent::CancelRequested { timestamp } => self.on_cancel_requested(timestamp),
         }
     }
 
@@ -148,7 +198,7 @@ impl HotkeyManager {
                 }
             }
             HotkeyMode::Toggle | HotkeyMode::Hybrid => {
-                // VoiceInk L386-411 : si hands-free actif, un press coupe la session.
+                // VoiceInk handleKeyDown : si hands-free actif, un press coupe la session.
                 if state.is_hands_free && state.is_recording {
                     state.is_recording = false;
                     state.is_hands_free = false;
@@ -177,9 +227,9 @@ impl HotkeyManager {
         let mode = self.mode_for(slot);
         match mode {
             HotkeyMode::Toggle => {
-                // VoiceInk HotkeyManager L414-415 : release en Toggle arme le
-                // hands-free pour que la prochaine press coupe la session.
-                // Sans ca, un "toggle" pur ne pourrait jamais s'eteindre via press.
+                // VoiceInk handleKeyUp : release en Toggle arme le hands-free
+                // pour que la prochaine press coupe la session. Sans ca, un
+                // "toggle" pur ne pourrait jamais s'eteindre via press.
                 if state.is_recording {
                     state.is_hands_free = true;
                 }
@@ -196,7 +246,7 @@ impl HotkeyManager {
                 }
             }
             HotkeyMode::Hybrid => {
-                // VoiceInk L424-432 : hold long = PTT, tap court = hands-free.
+                // VoiceInk handleKeyUp : hold long = PTT, tap court = hands-free.
                 if press_duration >= HYBRID_PRESS_THRESHOLD && state.is_recording {
                     state.is_recording = false;
                     state.last_action_at = Some(timestamp);
@@ -217,6 +267,10 @@ impl HotkeyManager {
     }
 
     fn on_escape(&self, timestamp: Instant) -> Option<HotkeyAction> {
+        // Un raccourci d'annulation personnalise remplace le double-Echap.
+        if self.custom_cancel.load(Ordering::Relaxed) {
+            return None;
+        }
         let mut state = self.state.lock();
         if !state.is_recording {
             return None;
@@ -233,9 +287,22 @@ impl HotkeyManager {
             _ => {
                 state.esc_first_press_at = Some(timestamp);
                 debug!("ESC pressed once, press again within 1500ms to cancel");
-                None
+                Some(HotkeyAction::EscapeHint)
             }
         }
+    }
+
+    fn on_cancel_requested(&self, timestamp: Instant) -> Option<HotkeyAction> {
+        let mut state = self.state.lock();
+        if !state.is_recording {
+            return None;
+        }
+        state.esc_first_press_at = None;
+        state.is_recording = false;
+        state.is_hands_free = false;
+        state.last_action_at = Some(timestamp);
+        info!("Custom cancel shortcut: cancel recording");
+        Some(HotkeyAction::CancelRecording)
     }
 }
 
@@ -385,12 +452,36 @@ mod tests {
     }
 
     #[test]
+    fn utility_passes_through_regardless_of_state() {
+        let m = HotkeyManager::with_modes(HotkeyMode::Hybrid, HotkeyMode::Hybrid);
+        let t0 = Instant::now();
+        assert_eq!(
+            m.handle_event(HotkeyEvent::Utility {
+                action: UtilityAction::CopyLastTranscription
+            }),
+            Some(HotkeyAction::Utility(UtilityAction::CopyLastTranscription))
+        );
+        // Meme pendant un enregistrement.
+        m.handle_event(pressed(t0));
+        assert_eq!(
+            m.handle_event(HotkeyEvent::Utility {
+                action: UtilityAction::OpenHistory
+            }),
+            Some(HotkeyAction::Utility(UtilityAction::OpenHistory))
+        );
+    }
+
+    #[test]
     fn double_esc_cancels_when_recording() {
         let m = HotkeyManager::with_modes(HotkeyMode::Toggle, HotkeyMode::Toggle);
         let t0 = Instant::now();
         m.handle_event(pressed(t0));
-        // Premier ESC : pas d'action (arm le double-tap).
-        assert_eq!(m.handle_event(esc(t0 + Duration::from_millis(100))), None);
+        // Premier ESC : pas d'annulation, mais l'UI recoit l'astuce
+        // (VoiceInk showEscapeConfirmationHintIfNeeded).
+        assert_eq!(
+            m.handle_event(esc(t0 + Duration::from_millis(100))),
+            Some(HotkeyAction::EscapeHint)
+        );
         // Second ESC dans la fenetre : cancel.
         assert_eq!(
             m.handle_event(esc(t0 + Duration::from_millis(500))),
@@ -413,8 +504,47 @@ mod tests {
         let t0 = Instant::now();
         m.handle_event(pressed(t0));
         m.handle_event(esc(t0 + Duration::from_millis(100)));
-        // Second ESC 2s plus tard : hors fenetre (1500ms), pas de cancel.
-        assert_eq!(m.handle_event(esc(t0 + Duration::from_millis(2100))), None);
+        // Second ESC 2s plus tard : hors fenetre (1500ms), pas de cancel,
+        // mais il re-arme la fenetre (nouvelle astuce).
+        assert_eq!(
+            m.handle_event(esc(t0 + Duration::from_millis(2100))),
+            Some(HotkeyAction::EscapeHint)
+        );
+    }
+
+    #[test]
+    fn custom_cancel_disables_escape_and_cancels_when_recording() {
+        let m = HotkeyManager::with_modes(HotkeyMode::Toggle, HotkeyMode::Toggle);
+        m.set_custom_cancel(true);
+        let t0 = Instant::now();
+        // Pas d'enregistrement : le raccourci custom ne fait rien.
+        assert_eq!(
+            m.handle_event(HotkeyEvent::CancelRequested { timestamp: t0 }),
+            None
+        );
+        m.handle_event(pressed(t0));
+        // Echap est ignore (ni astuce ni annulation).
+        assert_eq!(m.handle_event(esc(t0 + Duration::from_millis(100))), None);
+        assert_eq!(m.handle_event(esc(t0 + Duration::from_millis(300))), None);
+        // Le raccourci custom annule.
+        assert_eq!(
+            m.handle_event(HotkeyEvent::CancelRequested {
+                timestamp: t0 + Duration::from_millis(400)
+            }),
+            Some(HotkeyAction::CancelRecording)
+        );
+        assert!(!m.is_recording());
+    }
+
+    #[test]
+    fn external_start_is_stopped_by_next_press() {
+        // Enregistrement demarre depuis le tray : la prochaine pression du
+        // raccourci doit l'arreter directement (session hands-free).
+        let m = HotkeyManager::with_modes(HotkeyMode::Hybrid, HotkeyMode::Hybrid);
+        m.mark_started_externally();
+        assert!(m.is_recording());
+        let t0 = Instant::now();
+        assert_eq!(m.handle_event(pressed(t0)), Some(HotkeyAction::StopRecording));
     }
 
     #[test]

@@ -34,6 +34,7 @@ import {
   type HotkeySlotConfig,
   type HotkeyTrigger,
 } from "@/lib/tauri";
+import { translateError } from "@/lib/translateError";
 import { cn } from "@/lib/utils";
 
 const MODIFIER_OPTIONS: HotkeyOptionId[] = [
@@ -84,6 +85,7 @@ export function HotkeyCard() {
   const [config, setConfig] = useState<HotkeyConfig | null>(null);
   const [showSecondary, setShowSecondary] = useState(false);
   const [recorderTarget, setRecorderTarget] = useState<"primary" | "secondary" | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -96,11 +98,19 @@ export function HotkeyCard() {
   }, []);
 
   async function commit(next: HotkeyConfig) {
+    setError(null);
     setConfig(next);
     try {
-      await api.setHotkeyConfig(next);
+      // Cette card ne gere que primary / secondary : on relit les
+      // raccourcis additionnels pour ne pas ecraser ceux enregistres par
+      // AdditionalShortcutsCard entre temps.
+      const current = await api.getHotkeyConfig();
+      const merged = { ...next, actions: current.actions };
+      await api.setHotkeyConfig(merged);
+      setConfig(merged);
     } catch (e) {
-      console.error(e);
+      setError(translateError(t, String(e)));
+      api.getHotkeyConfig().then(setConfig).catch(console.error);
     }
   }
 
@@ -228,6 +238,12 @@ export function HotkeyCard() {
                   {t("hotkey.altGrTip")}
                 </p>
               )}
+
+            {error && (
+              <p className="rounded-md bg-destructive/10 p-2 text-xs text-destructive">
+                {error}
+              </p>
+            )}
           </>
         )}
       </CardContent>

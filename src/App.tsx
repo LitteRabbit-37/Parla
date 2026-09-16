@@ -39,7 +39,7 @@ import { api, type GpuInfo, type RecordingStopped } from "@/lib/tauri";
 import "./App.css";
 
 function App() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [view, setView] = useState<View>("dashboard");
   const [gpu, setGpu] = useState<GpuInfo | null>(null);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
@@ -73,25 +73,21 @@ function App() {
       // notice is dismissed or not.
       console.info("[tray]", e.payload);
     });
-    const unToggle = listen<void>("tray:toggle-record", async () => {
-      try {
-        const rec = await api.isRecording();
-        if (rec) {
-          await api.stopRecording(true);
-        } else {
-          await api.startRecording(null);
-        }
-      } catch (err) {
-        console.error("tray toggle record:", err);
-      }
-    });
+    // Le menu tray natif est traduit cote Rust : on lui reflete la langue
+    // i18next courante et chaque changement.
+    const syncLanguage = (lng: string) => {
+      api.setUiLanguage(lng.split("-")[0]).catch(console.error);
+    };
+    syncLanguage(i18n.resolvedLanguage ?? i18n.language ?? "en");
+    i18n.on("languageChanged", syncLanguage);
 
     return () => {
       unlisten.then((fn) => fn());
       unNav.then((fn) => fn());
       unNotice.then((fn) => fn());
-      unToggle.then((fn) => fn());
+      i18n.off("languageChanged", syncLanguage);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (onboarded === false) {

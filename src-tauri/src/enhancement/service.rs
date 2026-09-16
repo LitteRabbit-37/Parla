@@ -198,38 +198,51 @@ fn temperature_for(model: &str) -> f32 {
     }
 }
 
-/// Reasoning config par (provider, model). Reference VoiceInk AIService
-/// ReasoningConfig L~200-260.
+/// Reasoning config par (provider, model). Reference VoiceInk 2.13
+/// Infrastructure/Providers/Enhancement/ReasoningConfig.swift :
+///  - OpenAI GPT-5.x : reasoning "none" explicite (GPT-4.1 : aucun param).
+///  - Gemini 3.7 Flash et 3.1 Pro Preview : niveau "low" (pas de "minimal").
+///  - Gemini 3.6 Flash, 3.5 Flash(-Lite), 3.1 Flash-Lite : "minimal".
+///  - Gemini 2.5 Flash-Lite : rien (thinking off par defaut).
+///  - Cerebras gpt-oss-120b : "low" + reasoning_format hidden ;
+///    zai-glm-4.7 : "none".
+///  - Groq gpt-oss : "low" + include_reasoning false.
 fn reasoning_for(provider_id: &str, model: &str) -> ReasoningConfig {
     let mut cfg = ReasoningConfig::default();
     match (provider_id, model) {
-        ("openai", "gpt-5.4" | "gpt-5.4-mini" | "gpt-5.4-nano" | "gpt-5.2") => {
+        (
+            "openai",
+            "gpt-5.6-luna" | "gpt-5.6-terra" | "gpt-5.6-sol" | "gpt-5.5" | "gpt-5.4"
+            | "gpt-5.4-mini" | "gpt-5.4-nano",
+        ) => {
             cfg.effort = Some("none".into());
         }
-        ("openai", "gpt-5-mini" | "gpt-5-nano") => {
-            cfg.effort = Some("minimal".into());
-        }
-        ("gemini", "gemini-2.5-flash" | "gemini-2.5-flash-lite") => {
-            cfg.effort = Some("none".into());
+        ("gemini", "gemini-3.7-flash" | "gemini-3.1-pro-preview") => {
+            cfg.effort = Some("low".into());
         }
         (
             "gemini",
-            "gemini-3.1-pro-preview"
-            | "gemini-3-flash-preview"
-            | "gemini-3.1-flash-lite-preview",
+            "gemini-3.6-flash" | "gemini-3.5-flash-lite" | "gemini-3.5-flash"
+            | "gemini-3.1-flash-lite",
         ) => {
             cfg.effort = Some("minimal".into());
         }
-        ("cerebras", "gpt-oss-120b") => cfg.effort = Some("low".into()),
-        ("cerebras", "zai-glm-4.7") => {
+        ("cerebras", "gpt-oss-120b") => {
+            cfg.effort = Some("low".into());
             let mut map = serde_json::Map::new();
-            map.insert("disable_reasoning".into(), serde_json::Value::Bool(true));
+            map.insert(
+                "reasoning_format".into(),
+                serde_json::Value::String("hidden".into()),
+            );
             cfg.extra_body = Some(map);
         }
+        ("cerebras", "zai-glm-4.7") => cfg.effort = Some("none".into()),
         ("groq", "openai/gpt-oss-120b" | "openai/gpt-oss-20b") => {
             cfg.effort = Some("low".into());
+            let mut map = serde_json::Map::new();
+            map.insert("include_reasoning".into(), serde_json::Value::Bool(false));
+            cfg.extra_body = Some(map);
         }
-        ("groq", "qwen/qwen3-32b") => cfg.effort = Some("none".into()),
         _ => {}
     }
     cfg
@@ -460,27 +473,47 @@ mod tests {
 
     #[test]
     fn reasoning_for_openai_gpt5_flagship() {
-        let r = reasoning_for("openai", "gpt-5.4");
-        assert_eq!(r.effort, Some("none".into()));
-        assert!(r.extra_body.is_none());
+        // VoiceInk ReasoningConfig.openAINoneReasoningModels.
+        for m in ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.5", "gpt-5.4"] {
+            let r = reasoning_for("openai", m);
+            assert_eq!(r.effort, Some("none".into()), "{m}");
+            assert!(r.extra_body.is_none());
+        }
     }
 
     #[test]
     fn reasoning_for_openai_gpt5_mini() {
-        let r = reasoning_for("openai", "gpt-5-mini");
-        assert_eq!(r.effort, Some("minimal".into()));
+        let r = reasoning_for("openai", "gpt-5.4-mini");
+        assert_eq!(r.effort, Some("none".into()));
+        // GPT-4.1 : aucun parametre de raisonnement.
+        assert_eq!(reasoning_for("openai", "gpt-4.1").effort, None);
     }
 
     #[test]
     fn reasoning_for_gemini_flash() {
-        let r = reasoning_for("gemini", "gemini-2.5-flash");
-        assert_eq!(r.effort, Some("none".into()));
+        // 3.7 Flash et 3.1 Pro Preview ne supportent pas "minimal" -> "low".
+        assert_eq!(
+            reasoning_for("gemini", "gemini-3.7-flash").effort,
+            Some("low".into())
+        );
+        assert_eq!(
+            reasoning_for("gemini", "gemini-3.1-pro-preview").effort,
+            Some("low".into())
+        );
+        for m in [
+            "gemini-3.6-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-3.1-flash-lite",
+        ] {
+            assert_eq!(reasoning_for("gemini", m).effort, Some("minimal".into()), "{m}");
+        }
     }
 
     #[test]
     fn reasoning_for_gemini_pro() {
-        // gemini-2.5-pro n'est pas dans la liste "flash" donc effort = None.
-        let r = reasoning_for("gemini", "gemini-2.5-pro");
+        // 2.5 Flash-Lite : thinking off par defaut, aucun parametre.
+        let r = reasoning_for("gemini", "gemini-2.5-flash-lite");
         assert_eq!(r.effort, None);
     }
 
@@ -488,26 +521,28 @@ mod tests {
     fn reasoning_for_cerebras_oss120b() {
         let r = reasoning_for("cerebras", "gpt-oss-120b");
         assert_eq!(r.effort, Some("low".into()));
+        let body = r.extra_body.expect("extra_body attendu pour gpt-oss-120b");
+        assert_eq!(
+            body.get("reasoning_format"),
+            Some(&serde_json::Value::String("hidden".into()))
+        );
     }
 
     #[test]
     fn reasoning_for_cerebras_glm() {
         let r = reasoning_for("cerebras", "zai-glm-4.7");
-        assert_eq!(r.effort, None);
-        let body = r.extra_body.expect("extra_body attendu pour zai-glm");
-        assert_eq!(body.get("disable_reasoning"), Some(&serde_json::Value::Bool(true)));
+        assert_eq!(r.effort, Some("none".into()));
+        assert!(r.extra_body.is_none());
     }
 
     #[test]
     fn reasoning_for_groq_oss() {
-        assert_eq!(
-            reasoning_for("groq", "openai/gpt-oss-120b").effort,
-            Some("low".into())
-        );
-        assert_eq!(
-            reasoning_for("groq", "openai/gpt-oss-20b").effort,
-            Some("low".into())
-        );
+        for m in ["openai/gpt-oss-120b", "openai/gpt-oss-20b"] {
+            let r = reasoning_for("groq", m);
+            assert_eq!(r.effort, Some("low".into()), "{m}");
+            let body = r.extra_body.expect("extra_body attendu pour groq gpt-oss");
+            assert_eq!(body.get("include_reasoning"), Some(&serde_json::Value::Bool(false)));
+        }
     }
 
     #[test]

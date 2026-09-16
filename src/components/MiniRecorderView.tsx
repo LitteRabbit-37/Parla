@@ -1,12 +1,18 @@
 // Mini-recorder : overlay 300x120 affichee dans la fenetre "recorder".
 //
-// Reference VoiceInk MiniRecorderView.swift + RecorderComponents.swift +
-// AudioVisualizerView.swift :
-//   HStack [PromptButton 22pt] Spacer [StatusDisplay] Spacer [PowerModeButton 22pt]
-//   content-height 40pt epingle bas, background Color.black opaque,
-//   corner radius 20 (collapse) / 14 (expanded live).
+// Reference VoiceInk Features/Recording/Views/MiniRecorderView.swift +
+// Components/RecorderComponents.swift + AudioVisualizerView.swift :
+//   VStack [LiveTranscriptView 56pt (pendant l'enregistrement, si texte)]
+//          [Divider]
+//          HStack [PromptButton 22pt] Spacer [StatusDisplay] Spacer [ModeButton 22pt]
+//   control bar 40pt epingle bas, background Color.black opaque,
+//   largeur 184 (compact) / 300 (texte en direct), corner radius 20 / 14.
 //   15 bars audio avec wave + center boost, 60 FPS.
 //   Processing: "Transcribing" / "Enhancing" + 5 dots animes.
+//   Texte en direct : reglage ShowLiveTranscript (defaut true), affiche
+//   uniquement pendant recordingState == .recording (commit 42f7ec8).
+//   Astuce Echap : "Press Esc again to cancel" au premier Echap, une seule
+//   fois (RecorderPanelShortcutManager.showEscapeConfirmationHintIfNeeded).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -28,6 +34,8 @@ import { cn, powerShortcutLabel } from "@/lib/utils";
 
 const COLLAPSED_HEIGHT = 120;
 const POPOVER_HEIGHT = 400;
+/// Duree d'affichage de l'astuce Echap = fenetre du double-Echap (1.5 s).
+const ESCAPE_HINT_MS = 1500;
 
 type Stage = "idle" | "recording" | "transcribing" | "enhancing";
 
@@ -47,9 +55,16 @@ type StreamingEvent =
 const BARS = 15;
 
 export function MiniRecorderView() {
+  const { t } = useTranslation();
   const [stage, setStage] = useState<Stage>("recording");
   const [meterDb, setMeterDb] = useState<number>(-160);
-  const [partial, setPartial] = useState<string | null>(null);
+  // Texte en direct : les providers streaming envoient a chaque event le
+  // transcript cumule (segments confirmes + hypothese), on affiche donc
+  // toujours le dernier recu (VoiceInk StreamingTranscriptionService
+  // committed + partial).
+  const [liveText, setLiveText] = useState<string>("");
+  const [showLiveTranscript, setShowLiveTranscript] = useState(true);
+  const [escapeHint, setEscapeHint] = useState(false);
   const [powerSession, setPowerSession] = useState<PowerSession | null>(null);
 
   // Power Mode / Prompts state (pour les popovers).
@@ -110,18 +125,24 @@ export function MiniRecorderView() {
       api.getEnhancementEnabled(),
       api.listPowerConfigs(),
       api.getRecorderStyle(),
+      api.getShowLiveTranscript(),
     ])
-      .then(([ps, aid, en, pcs, rs]) => {
+      .then(([ps, aid, en, pcs, rs, live]) => {
         setPrompts(ps);
         setActivePromptId(aid);
         setEnhancementEnabled(en);
         setPowerConfigs(pcs);
         setStyle(rs === "notch" ? "notch" : "mini");
+        setShowLiveTranscript(live);
       })
       .catch(console.error);
 
+    let hintTimer: number | null = null;
     const unlistens = [
-      listen("recording:stopped", () => setStage("transcribing")),
+      listen("recording:stopped", () => {
+        setStage("transcribing");
+        setEscapeHint(false);
+      }),
       listen("recording:cancelled", () => setStage("idle")),
       listen<PipelineEvent>("pipeline:state", (e) => {
         const p = e.payload;
@@ -133,14 +154,20 @@ export function MiniRecorderView() {
       listen<StreamingEvent>("streaming:event", (e) => {
         const s = e.payload;
         if (s.kind === "partial" || s.kind === "committed") {
-          setPartial((prev) => (prev === s.text ? prev : s.text));
+          setLiveText((prev) => (prev === s.text ? prev : s.text));
         }
+      }),
+      listen("recorder:escape-hint", () => {
+        setEscapeHint(true);
+        if (hintTimer !== null) window.clearTimeout(hintTimer);
+        hintTimer = window.setTimeout(() => setEscapeHint(false), ESCAPE_HINT_MS);
       }),
       listen<PowerSession | null>("power_mode:active", (e) => {
         setPowerSession(e.payload);
       }),
     ];
     return () => {
+      if (hintTimer !== null) window.clearTimeout(hintTimer);
       Promise.all(unlistens).then((arr) => arr.forEach((fn) => fn()));
     };
   }, []);
@@ -162,8 +189,12 @@ export function MiniRecorderView() {
     return () => window.cancelAnimationFrame(raf);
   }, [stage]);
 
-  const hasLiveText = partial !== null && partial.length > 0;
-  const expanded = stage === "transcribing" && hasLiveText;
+  // VoiceInk hasLiveTranscript : showLiveTranscript && state == .recording
+  // && !partialTranscript.isEmpty. Le texte disparait a l'arret, remplace
+  // par le badge "Transcribing".
+  const hasLiveText =
+    showLiveTranscript && stage === "recording" && liveText.trim().length > 0;
+  const expanded = hasLiveText;
   const isNotch = style === "notch";
 
   // Notch : content aligne en haut, pill qui descend du bord superieur
@@ -190,12 +221,19 @@ export function MiniRecorderView() {
     >
       <div
         className={cn(
-          "flex h-10 items-center bg-black text-white shadow-lg transition-all duration-300 ease-in-out",
+          "flex flex-col bg-black text-white shadow-lg transition-all duration-300 ease-in-out",
           expanded ? "w-[300px]" : "w-[184px]",
           shape,
         )}
         style={spacingStyle}
       >
+        {hasLiveText && !isNotch && (
+          <>
+            <LiveTranscript text={liveText} />
+            <div className="h-px bg-white/15" />
+          </>
+        )}
+        <div className="flex h-10 items-center">
         <RecorderPromptButton
           open={popoverOpen === "prompt"}
           onOpenChange={handlePopoverChange("prompt")}
@@ -227,14 +265,16 @@ export function MiniRecorderView() {
         />
 
         <div className="flex flex-1 items-center justify-center overflow-hidden px-1">
-          {stage === "recording" && (
+          {stage === "recording" && escapeHint && (
+            <span className="truncate text-[11px] font-medium text-white/90">
+              {t("miniRecorder.escapeHint")}
+            </span>
+          )}
+          {stage === "recording" && !escapeHint && (
             <AudioVisualizer meterDb={meterDb} />
           )}
-          {stage === "transcribing" && !hasLiveText && (
+          {stage === "transcribing" && (
             <ProcessingStatusDisplay label="Transcribing" intervalMs={180} />
-          )}
-          {stage === "transcribing" && hasLiveText && (
-            <LiveTranscript text={partial ?? ""} />
           )}
           {stage === "enhancing" && (
             <ProcessingStatusDisplay label="Enhancing" intervalMs={220} />
@@ -250,6 +290,13 @@ export function MiniRecorderView() {
           session={powerSession}
           configs={powerConfigs}
         />
+        </div>
+        {hasLiveText && isNotch && (
+          <>
+            <div className="h-px bg-white/15" />
+            <LiveTranscript text={liveText} />
+          </>
+        )}
       </div>
     </div>
   );
@@ -554,7 +601,12 @@ function ProcessingStatusDisplay({
   );
 }
 
-// -- LiveTranscript (mode expanded pour streaming partiel) -----------------
+// -- LiveTranscript (VoiceInk LiveTranscriptView) ---------------------------
+//
+// Zone de 54 px (VoiceInk 56 pt, reduite d'un rien pour tenir dans la
+// fenetre de 120 px avec la marge basse de 24 px), texte 12 pt blanc 80 %,
+// masque degrade en haut, defilement automatique vers le bas a chaque mise
+// a jour, sans animation pour que les glyphes ne glissent pas.
 
 function LiveTranscript({ text }: { text: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -566,7 +618,13 @@ function LiveTranscript({ text }: { text: string }) {
   return (
     <div
       ref={ref}
-      className="max-h-10 overflow-hidden px-2 text-[12px] leading-tight text-white/80"
+      className="h-[54px] overflow-hidden px-4 py-1.5 text-left text-[12px] leading-snug text-white/80"
+      style={{
+        maskImage:
+          "linear-gradient(to bottom, transparent 0%, black 18%, black 100%)",
+        WebkitMaskImage:
+          "linear-gradient(to bottom, transparent 0%, black 18%, black 100%)",
+      }}
     >
       {text}
     </div>

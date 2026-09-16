@@ -243,6 +243,12 @@ export function EnhancementPanel() {
               onChange={(e) => selectModel(e.target.value)}
               className="h-9 rounded-md border border-input bg-background px-2 text-sm"
             >
+              {selection?.model &&
+                !currentProvider.models.includes(selection.model) && (
+                  <option value={selection.model}>
+                    {t("enhancement.currentModel", { model: selection.model })}
+                  </option>
+                )}
               {currentProvider.models.map((m) => (
                 <option key={m} value={m}>
                   {m}

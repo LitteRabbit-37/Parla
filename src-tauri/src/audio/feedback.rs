@@ -1,7 +1,9 @@
 // Recording feedback cues (start / stop / cancel).
 //
-// Reference VoiceInk : SoundManager.swift. Same three cues, same reduced
-// volumes (0.4 / 0.4 / 0.3). VoiceInk uses AVAudioPlayer ; we use rodio on
+// Reference VoiceInk : Infrastructure/Audio/SoundManager.swift +
+// SoundPlaybackEngine.swift. Same three cues, same reduced volumes
+// (0.3 / 0.3 / 0.2 since VoiceInk 2.0, commit 81157a5 "Reduce sound
+// volumes"). VoiceInk uses AVAudioPlayer ; we use rodio on
 // top of the cpal output device. The sounds are embedded in the binary so
 // there is no resource path to resolve at runtime.
 //
@@ -36,12 +38,12 @@ pub enum Cue {
 
 impl Cue {
     /// Embedded audio bytes + playback volume for this cue. Volumes match
-    /// VoiceInk's SoundManager (start/stop 0.4, esc 0.3).
+    /// VoiceInk 2.x SoundPlaybackEngine (start/stop 0.3, esc 0.2).
     fn payload(self) -> (&'static [u8], f32) {
         match self {
-            Cue::Start => (START_BYTES, 0.4),
-            Cue::Stop => (STOP_BYTES, 0.4),
-            Cue::Cancel => (CANCEL_BYTES, 0.3),
+            Cue::Start => (START_BYTES, 0.3),
+            Cue::Stop => (STOP_BYTES, 0.3),
+            Cue::Cancel => (CANCEL_BYTES, 0.2),
         }
     }
 }

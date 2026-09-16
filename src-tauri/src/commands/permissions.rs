@@ -134,11 +134,14 @@ fn autostart_enabled(app: &AppHandle) -> Result<bool, String> {
 pub fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
     let mgr = app.autolaunch();
-    if enabled {
+    let result = if enabled {
         mgr.enable().map_err(|e| e.to_string())
     } else {
         mgr.disable().map_err(|e| e.to_string())
-    }
+    };
+    // Le menu tray affiche une case "Lancer au demarrage".
+    crate::tray::refresh(&app);
+    result
 }
 
 #[command]
@@ -179,7 +182,10 @@ pub fn set_onboarding_completed(app: AppHandle, completed: bool) -> Result<(), S
     use tauri_plugin_store::StoreExt;
     let store = app.store(STORE_FILE).map_err(|e| e.to_string())?;
     store.set(KEY_ONBOARDING, serde_json::Value::Bool(completed));
-    store.save().map_err(|e| e.to_string())
+    store.save().map_err(|e| e.to_string())?;
+    // Le menu tray est reduit tant que l'onboarding n'est pas termine.
+    crate::tray::refresh(&app);
+    Ok(())
 }
 
 #[command]

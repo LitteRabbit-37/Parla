@@ -10,7 +10,40 @@
 
 use cpal::traits::{DeviceTrait, HostTrait};
 use serde::{Deserialize, Serialize};
+use tauri::AppHandle;
+use tauri_plugin_store::StoreExt;
 use tracing::debug;
+
+const STORE_FILE: &str = "parla.settings.json";
+/// Nom du micro choisi par l'utilisateur (reglages / menu tray). Absent ou
+/// vide = peripherique par defaut du systeme (VoiceInk
+/// AudioDeviceManager.selectedDeviceMode == .systemDefault).
+const KEY_SELECTED_INPUT: &str = "selected_input_device";
+
+/// Micro selectionne, `None` = defaut systeme.
+pub fn selected_input_device(app: &AppHandle) -> Option<String> {
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|s| s.get(KEY_SELECTED_INPUT))
+        .and_then(|v| v.as_str().map(String::from))
+        .filter(|s| !s.trim().is_empty())
+}
+
+/// Persiste le micro choisi (`None` = defaut systeme).
+pub fn set_selected_input_device(app: &AppHandle, name: Option<String>) -> anyhow::Result<()> {
+    let store = app
+        .store(STORE_FILE)
+        .map_err(|e| anyhow::anyhow!("store: {e}"))?;
+    match name.filter(|s| !s.trim().is_empty()) {
+        Some(n) => store.set(KEY_SELECTED_INPUT, serde_json::Value::String(n)),
+        None => {
+            store.delete(KEY_SELECTED_INPUT);
+        }
+    }
+    store
+        .save()
+        .map_err(|e| anyhow::anyhow!("store save: {e}"))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioDeviceInfo {

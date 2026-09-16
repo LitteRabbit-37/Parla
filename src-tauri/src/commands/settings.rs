@@ -271,3 +271,110 @@ pub fn get_sound_feedback_enabled(app: AppHandle) -> bool {
 pub fn set_sound_feedback_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
     crate::audio::feedback::set_enabled(&app, enabled).map_err(|e| e.to_string())
 }
+
+// -- Live text display in the recorder pill (VoiceInk ShowLiveTranscript) ---
+
+const KEY_SHOW_LIVE_TRANSCRIPT: &str = "show_live_transcript";
+
+/// Reference VoiceInk AppDefaults `RecorderDisplaySettingsKeys
+/// .showLiveTranscript` = "ShowLiveTranscript", defaut true.
+#[tauri::command]
+pub fn get_show_live_transcript(app: AppHandle) -> bool {
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|s| s.get(KEY_SHOW_LIVE_TRANSCRIPT).and_then(|v| v.as_bool()))
+        .unwrap_or(true)
+}
+
+#[tauri::command]
+pub fn set_show_live_transcript(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let store = app.store(STORE_FILE).map_err(|e| e.to_string())?;
+    store.set(KEY_SHOW_LIVE_TRANSCRIPT, serde_json::Value::Bool(enabled));
+    store.save().map_err(|e| e.to_string())
+}
+
+// -- Cloud transcription timeout (VoiceInk CloudTranscriptionSettings) ------
+
+const KEY_CLOUD_TIMEOUT: &str = "cloud_transcription_timeout_secs";
+
+/// Timeout batch cloud persiste (secondes), borne 10 s .. 30 min.
+pub fn cloud_timeout_secs(app: &AppHandle) -> u64 {
+    use crate::transcription::cloud::http;
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|s| s.get(KEY_CLOUD_TIMEOUT).and_then(|v| v.as_u64()))
+        .unwrap_or(http::DEFAULT_BATCH_TIMEOUT_SECS)
+        .clamp(http::MIN_BATCH_TIMEOUT_SECS, http::MAX_BATCH_TIMEOUT_SECS)
+}
+
+#[tauri::command]
+pub fn get_cloud_transcription_timeout(app: AppHandle) -> u64 {
+    cloud_timeout_secs(&app)
+}
+
+#[tauri::command]
+pub fn set_cloud_transcription_timeout(app: AppHandle, secs: u64) -> Result<(), String> {
+    use crate::transcription::cloud::http;
+    let clamped = secs.clamp(http::MIN_BATCH_TIMEOUT_SECS, http::MAX_BATCH_TIMEOUT_SECS);
+    let store = app.store(STORE_FILE).map_err(|e| e.to_string())?;
+    store.set(KEY_CLOUD_TIMEOUT, serde_json::Value::from(clamped));
+    store.save().map_err(|e| e.to_string())?;
+    http::set_batch_timeout_secs(clamped);
+    Ok(())
+}
+
+// -- Selected input device (VoiceInk AudioDeviceManager) --------------------
+
+#[tauri::command]
+pub fn get_selected_input_device(app: AppHandle) -> Option<String> {
+    crate::audio::device::selected_input_device(&app)
+}
+
+#[tauri::command]
+pub fn set_selected_input_device(app: AppHandle, name: Option<String>) -> Result<(), String> {
+    crate::audio::device::set_selected_input_device(&app, name).map_err(|e| e.to_string())?;
+    crate::tray::refresh(&app);
+    Ok(())
+}
+
+// -- UI language, mirrored for the native tray menu -------------------------
+
+const KEY_UI_LANGUAGE: &str = "ui_language";
+
+/// Langue de l'interface (en / fr / es), ecrite par le frontend a chaque
+/// changement i18next pour que le menu tray natif soit traduit.
+pub fn ui_language(app: &AppHandle) -> String {
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|s| s.get(KEY_UI_LANGUAGE))
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_else(|| "en".into())
+}
+
+#[tauri::command]
+pub fn get_ui_language(app: AppHandle) -> String {
+    ui_language(&app)
+}
+
+#[tauri::command]
+pub fn set_ui_language(app: AppHandle, language: String) -> Result<(), String> {
+    let store = app.store(STORE_FILE).map_err(|e| e.to_string())?;
+    let changed = ui_language(&app) != language;
+    store.set(KEY_UI_LANGUAGE, serde_json::Value::String(language));
+    store.save().map_err(|e| e.to_string())?;
+    if changed {
+        crate::tray::refresh(&app);
+    }
+    Ok(())
+}
+
+// -- Escape cancel hint (VoiceInk RecorderPanelShortcutManager) -------------
+
+/// Reaffiche l'astuce "Appuyez encore sur Echap pour annuler" au prochain
+/// enregistrement (bouton reset du raccourci d'annulation).
+#[tauri::command]
+pub fn reset_escape_hint(app: AppHandle) -> Result<(), String> {
+    let store = app.store(STORE_FILE).map_err(|e| e.to_string())?;
+    store.delete(crate::transcription::engine::ESCAPE_HINT_KEY);
+    store.save().map_err(|e| e.to_string())
+}

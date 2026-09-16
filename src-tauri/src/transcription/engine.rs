@@ -25,12 +25,14 @@ use tauri::{AppHandle, Emitter, Manager};
 use tracing::warn;
 
 use crate::audio::mute as system_mute;
+use crate::commands::hotkey::HotkeyManagerState;
 use crate::commands::recording::{
     cancel_recording_core, start_recording_core, start_recording_core_with_chunk,
     stop_recording_core, RecorderState,
 };
 use crate::commands::streaming::StreamingSessionState;
-use crate::hotkeys::keyboard_hook;
+use crate::history::last_transcription;
+use crate::hotkeys::keyboard_hook::{self, UtilityAction};
 use crate::hotkeys::manager::{HotkeyAction, HotkeyManager};
 use crate::mini_recorder;
 use crate::paste;
@@ -43,13 +45,83 @@ use crate::transcription::pipeline;
 pub fn handle_hotkey_action(app: &AppHandle, manager: &Arc<HotkeyManager>, action: HotkeyAction) {
     let state = app.state::<RecorderState>();
     match action {
-        HotkeyAction::StartRecording => start(app, manager, &state),
+        HotkeyAction::StartRecording => {
+            start(app, manager, &state);
+        }
         HotkeyAction::StopRecording => stop(app, manager, &state),
         HotkeyAction::CancelRecording => cancel(app, manager, &state),
         HotkeyAction::EnterHandsFree => {
             let _ = app.emit("hotkey:action", "hands-free");
         }
         HotkeyAction::SelectPowerMode(index) => select_power_mode(app, index),
+        HotkeyAction::EscapeHint => escape_hint(app),
+        HotkeyAction::Utility(action) => run_utility(app, action),
+    }
+}
+
+/// Bascule enregistrement depuis une UI (menu tray "Toggle Recorder") :
+/// meme cycle complet que le raccourci (mini-recorder, Power Mode, capture
+/// ecran, mute), puis la machine a etats est informee qu'une session
+/// hands-free a demarre pour que la prochaine pression du raccourci
+/// l'arrete. Reference VoiceInk MenuBarView "Toggle Recorder" ->
+/// RecorderUIManager.handleToggleRecorderPanelNotification.
+pub fn toggle_from_ui(app: &AppHandle) {
+    let Some(mgr) = app.try_state::<HotkeyManagerState>() else {
+        warn!("toggle_from_ui: hotkey manager absent");
+        return;
+    };
+    let manager = mgr.0.clone();
+    let state = app.state::<RecorderState>();
+    let recording = state.0.lock().is_some();
+    if recording {
+        stop(app, &manager, &state);
+    } else if start(app, &manager, &state) {
+        manager.mark_started_externally();
+    }
+}
+
+/// Premier Echap pendant un enregistrement : affiche une seule fois
+/// l'astuce "Appuyez encore sur Echap pour annuler" dans la mini-recorder.
+/// Reference VoiceInk RecorderPanelShortcutManager
+/// .showEscapeConfirmationHintIfNeeded (cle
+/// hasShownEscapeCancelConfirmationHint).
+fn escape_hint(app: &AppHandle) {
+    use tauri_plugin_store::StoreExt;
+    let Ok(store) = app.store("parla.settings.json") else {
+        return;
+    };
+    let shown = store
+        .get(ESCAPE_HINT_KEY)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if shown {
+        return;
+    }
+    store.set(ESCAPE_HINT_KEY, serde_json::Value::Bool(true));
+    let _ = store.save();
+    let _ = app.emit("recorder:escape-hint", ());
+}
+
+/// Cle store de l'astuce Echap (reinitialisee par le bouton "reset" du
+/// raccourci d'annulation dans les reglages).
+pub const ESCAPE_HINT_KEY: &str = "escape_cancel_hint_shown";
+
+/// Raccourcis utilitaires globaux (VoiceInk RecordingShortcutManager
+/// .handleGlobalShortcut).
+fn run_utility(app: &AppHandle, action: UtilityAction) {
+    let result = match action {
+        UtilityAction::CopyLastTranscription => last_transcription::copy_last(app),
+        UtilityAction::PasteLastTranscription => last_transcription::paste_last(app, false),
+        UtilityAction::PasteLastEnhancement => last_transcription::paste_last(app, true),
+        UtilityAction::RetryLastTranscription => last_transcription::retry_last(app),
+        UtilityAction::OpenHistory => {
+            last_transcription::open_history(app);
+            Ok(())
+        }
+    };
+    if let Err(e) = result {
+        warn!(?action, error = %e, "utility shortcut failed");
+        let _ = app.emit("tray:notice", format!("{action:?} failed: {e}"));
     }
 }
 
@@ -61,7 +133,9 @@ fn select_power_mode(app: &AppHandle, index: usize) {
     }
 }
 
-fn start(app: &AppHandle, manager: &Arc<HotkeyManager>, state: &tauri::State<RecorderState>) {
+/// Demarre un cycle d'enregistrement. Retourne `true` si la capture (ou la
+/// session streaming) a effectivement demarre.
+fn start(app: &AppHandle, manager: &Arc<HotkeyManager>, state: &tauri::State<RecorderState>) -> bool {
     let _ = app.emit("hotkey:action", "start");
     // Sauvegarde le HWND de l'app actuellement focus AVANT d'ouvrir
     // la mini-recorder (qui peut voler le focus). On le restaure
@@ -94,7 +168,7 @@ fn start(app: &AppHandle, manager: &Arc<HotkeyManager>, state: &tauri::State<Rec
     // if the feature is disabled. Restored in stop() / cancel().
     system_mute::engage(app);
     // Determine si on utilise le streaming cloud.
-    if let Some((provider, model)) = pipeline::active_streaming_target(app) {
+    let started = if let Some((provider, model)) = pipeline::active_streaming_target(app) {
         let app_bg = app.clone();
         tauri::async_runtime::spawn(async move {
             if let Err(e) = start_with_streaming(app_bg.clone(), provider, model).await {
@@ -102,15 +176,24 @@ fn start(app: &AppHandle, manager: &Arc<HotkeyManager>, state: &tauri::State<Rec
             }
         });
         manager.mark_recording_state(true);
+        true
     } else if let Err(e) = start_recording_core(app, state, None) {
         warn!("start_recording via hotkey: {e}");
         // L'enregistrement n'a pas demarre : desarme les raccourcis Power Mode.
         keyboard_hook::set_power_shortcut_count(0);
         manager.mark_recording_state(false);
         mini_recorder::close(app);
+        false
     } else {
         manager.mark_recording_state(true);
-    }
+        true
+    };
+    // Arme le raccourci d'annulation personnalise (hook) pour la duree de
+    // l'enregistrement (VoiceInk : monitor actif tant que le recorder est
+    // visible) et rafraichit le menu tray (mode actif).
+    keyboard_hook::set_recording_active(started);
+    crate::tray::refresh(app);
+    started
 }
 
 fn stop(app: &AppHandle, manager: &Arc<HotkeyManager>, state: &tauri::State<RecorderState>) {
@@ -138,8 +221,10 @@ fn stop(app: &AppHandle, manager: &Arc<HotkeyManager>, state: &tauri::State<Reco
         }
         Err(e) => warn!("stop_recording via hotkey: {e}"),
     }
-    // Fin d'enregistrement : desarme les raccourcis Alt+chiffre Power Mode.
+    // Fin d'enregistrement : desarme les raccourcis Alt+chiffre Power Mode
+    // et le raccourci d'annulation personnalise.
     keyboard_hook::set_power_shortcut_count(0);
+    keyboard_hook::set_recording_active(false);
     manager.mark_recording_state(false);
 }
 
@@ -155,10 +240,13 @@ fn cancel(app: &AppHandle, manager: &Arc<HotkeyManager>, state: &tauri::State<Re
     }
     power_mode::session::end_session(app);
     let _ = app.emit("power_mode:active", serde_json::Value::Null);
-    // Annulation : desarme les raccourcis Alt+chiffre Power Mode.
+    // Annulation : desarme les raccourcis Alt+chiffre Power Mode et le
+    // raccourci d'annulation personnalise.
     keyboard_hook::set_power_shortcut_count(0);
+    keyboard_hook::set_recording_active(false);
     manager.mark_recording_state(false);
     mini_recorder::close(app);
+    crate::tray::refresh(app);
 }
 
 /// Demarre simultanement la session WebSocket streaming et le recorder audio.

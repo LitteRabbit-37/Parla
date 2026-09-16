@@ -174,7 +174,10 @@
     "textFormatting": "Text formatting",
     "textFormattingDescription": "Apply sentence case, capitalization and punctuation cleanup.",
     "removeFillers": "Remove filler words",
-    "fillerList": "Filler word list (comma-separated)"
+    "fillerList": "Filler word list (comma-separated)",
+    "liveTranscript": "Live text display",
+    "liveTranscriptInfo": "Shows live text while recording with realtime models (cloud streaming providers).",
+    "liveTranscriptDescription": "The recorder pill shows the text as you speak."
   },
   "onboarding": {
     "welcome": {
@@ -397,7 +400,8 @@
     "keySavedOk": "OK, key saved",
     "keyDeleted": "Key deleted",
     "activePrompt": "Active prompt",
-    "predefined": "(predefined)"
+    "predefined": "(predefined)",
+    "currentModel": "{{model}} (current)"
   },
   "screenContext": {
     "title": "Active window context (OCR)",
@@ -513,7 +517,8 @@
       "toggle": "Toggle",
       "pushToTalk": "Push-to-talk",
       "hybrid": "Hybrid"
-    }
+    },
+    "systemDefault": "System default"
   },
   "transcribe": {
     "title": "Local transcription",
@@ -625,7 +630,8 @@
     "powerMode": "Power Mode",
     "noConfigs": "No config defined. Create a profile so Parla automatically switches prompt + LLM + source based on the active app.",
     "openPowerMode": "Open Power Mode",
-    "autoSwitch": "Switches automatically based on the current app. Alt+number picks a profile manually."
+    "autoSwitch": "Switches automatically based on the current app. Alt+number picks a profile manually.",
+    "escapeHint": "Press Esc again to cancel"
   },
   "promptDetection": {
     "triggerDetected": "Trigger word detected: {{word}}",
@@ -640,7 +646,14 @@
     "noWhisper": "No Whisper model selected. Open AI Models and pick one.",
     "noParakeet": "No Parakeet model selected. Open AI Models and pick one.",
     "parakeetIncomplete": "Parakeet model {{model}} is incomplete. Re-download it from AI Models.",
-    "cloudUnconfigured": "No cloud provider or model selected. Open AI Models and configure one."
+    "cloudUnconfigured": "No cloud provider or model selected. Open AI Models and configure one.",
+    "shortcutConflict": "Shortcut already used by {{b}} ({{a}}).",
+    "shortcutReserved": "Alt+digit is reserved for Power Mode profiles while recording ({{action}}).",
+    "shortcutNeedsModifier": "This key needs a modifier (Ctrl, Alt, Shift or Win) ({{action}}).",
+    "historyEmpty": "The history is empty.",
+    "lastTranscriptionEmpty": "The last transcription is empty.",
+    "audioMissing": "Cannot retry: the audio file of the last transcription is missing.",
+    "recordingInProgress": "A recording is in progress."
   },
   "prompts": {
     "default": {
@@ -688,6 +701,38 @@
       "waiting": "Press your combination...",
       "needsModifier": "A standalone key is only allowed for F1-F24, Insert, Delete, Home, End, PageUp/Down, Pause, PrintScreen. Otherwise add Ctrl, Alt, Shift or Win."
     },
-    "editCombo": "Click to change the combination"
+    "editCombo": "Click to change the combination",
+    "additional": {
+      "cardTitle": "Additional shortcuts",
+      "cardDescription": "Global shortcuts for the last transcription and for cancelling a recording. Not set by default.",
+      "copyLast": "Copy last transcription",
+      "copyLastHint": "Copies the last transcription (enhanced text if available) to the clipboard. Also available in the tray menu.",
+      "pasteLast": "Paste last transcription (original)",
+      "pasteLastEnhanced": "Paste last transcription (enhanced)",
+      "retryLast": "Retry last transcription",
+      "retryLastHint": "Transcribes the last recording again with the current model and enhancement, then copies the result to the clipboard and adds it to the history.",
+      "openHistory": "Open history",
+      "cancelRecording": "Cancel recording",
+      "cancelHint": "The assigned shortcut cancels the recording. Resetting restores the default double-Escape behavior.",
+      "cancelDefault": "Esc, Esc",
+      "notSet": "Not set",
+      "record": "Record a shortcut",
+      "clear": "Clear",
+      "reset": "Reset to default",
+      "actionNames": {
+        "primary": "Primary recording shortcut",
+        "secondary": "Secondary recording shortcut",
+        "cancelRecording": "Cancel recording",
+        "copyLast": "Copy last transcription",
+        "pasteLast": "Paste last transcription (original)",
+        "pasteLastEnhanced": "Paste last transcription (enhanced)",
+        "retryLast": "Retry last transcription",
+        "openHistory": "Open history"
+      }
+    }
+  },
+  "cloudTimeout": {
+    "title": "Cloud transcription timeout",
+    "description": "Maximum time to wait for a cloud provider to return a transcription. Default 30 seconds."
   }
 }

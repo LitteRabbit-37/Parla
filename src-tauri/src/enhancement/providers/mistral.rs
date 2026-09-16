@@ -12,10 +12,12 @@ use super::openai_compat;
 
 pub struct MistralProvider;
 
+// VoiceInk 2.13 AIService.availableModels (.mistral), commit fda3169
+// "Update Mistral model defaults" : small en premier et par defaut.
 const MODELS: &[&str] = &[
-    "mistral-large-latest",
-    "mistral-medium-latest",
     "mistral-small-latest",
+    "mistral-medium-latest",
+    "mistral-large-latest",
 ];
 
 #[async_trait]
@@ -30,7 +32,7 @@ impl LLMProvider for MistralProvider {
         MODELS
     }
     fn default_model(&self) -> &'static str {
-        "mistral-large-latest"
+        "mistral-small-latest"
     }
     fn endpoint(&self) -> &'static str {
         "https://api.mistral.ai/v1/chat/completions"

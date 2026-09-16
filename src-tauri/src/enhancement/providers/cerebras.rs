@@ -12,10 +12,10 @@ use super::openai_compat;
 
 pub struct CerebrasProvider;
 
+// VoiceInk 2.13 AIService.availableModels (.cerebras).
 const MODELS: &[&str] = &[
     "gpt-oss-120b",
-    "llama3.1-8b",
-    "qwen-3-235b-a22b-instruct-2507",
+    "gemma-4-31b",
     "zai-glm-4.7",
 ];
 

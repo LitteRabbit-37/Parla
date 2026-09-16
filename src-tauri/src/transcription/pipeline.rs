@@ -64,6 +64,17 @@ pub struct PipelineEvent {
     pub duration_ms: Option<u64>,
 }
 
+/// Destination du texte final.
+/// - `Paste`    : collage au curseur (dictee normale).
+/// - `CopyOnly` : presse-papiers uniquement, pas de Ctrl+V ni d'espace
+///   final ni de son "stop" (VoiceInk LastTranscriptionService
+///   .retryLastTranscription -> ClipboardManager.copyToClipboard).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Delivery {
+    Paste,
+    CopyOnly,
+}
+
 /// State qui tient l'id de la ligne history en cours pour la session
 /// active (non-streaming ou streaming). Set au record start, lu a
 /// chaque etape du pipeline.
@@ -307,10 +318,11 @@ pub async fn finalize_streaming_session(
         "streaming",
         get_language(&app).as_deref(),
     );
-    let result = finalize_text(&app, text, duration_ms).await;
+    let result = finalize_text(&app, text, duration_ms, Delivery::Paste).await;
     // Fin de la session Power Mode (idem branche batch).
     crate::power_mode::session::end_session(&app);
     let _ = app.emit("power_mode:active", serde_json::Value::Null);
+    crate::tray::refresh(&app);
     clear_history_id(&app);
     result
 }
@@ -323,7 +335,7 @@ pub fn run_after_recording(app: AppHandle, wav_path: PathBuf) {
     // tauri::async_runtime::spawn fonctionne depuis n'importe quel thread
     // (le hotkey-dispatch est un std::thread sans runtime Tokio attache).
     tauri::async_runtime::spawn(async move {
-        let result = run_pipeline(app_bg.clone(), wav_path).await;
+        let result = run_pipeline(app_bg.clone(), wav_path, Delivery::Paste).await;
         if let Err(e) = result {
             warn!("Pipeline echec: {e}");
             mark_failed(&app_bg, &e.to_string());
@@ -355,6 +367,41 @@ pub fn run_after_recording(app: AppHandle, wav_path: PathBuf) {
         // PowerModeSessionManager.endSession).
         crate::power_mode::session::end_session(&app_bg);
         let _ = app_bg.emit("power_mode:active", serde_json::Value::Null);
+        crate::tray::refresh(&app_bg);
+        clear_history_id(&app_bg);
+    });
+}
+
+/// Retranscrit un fichier audio existant (dernier enregistrement) avec la
+/// source courante, enhancement compris, et copie le resultat dans le
+/// presse-papiers. Cree une nouvelle entree d'historique, comme VoiceInk
+/// AudioTranscriptionService.retranscribeAudio. Pas de mini-recorder, pas
+/// de session Power Mode : c'est une action utilitaire hors dictee.
+pub fn run_retry(app: AppHandle, wav_path: PathBuf) {
+    insert_pending_row(&app, Some(&wav_path));
+    let app_bg = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let result = run_pipeline(app_bg.clone(), wav_path, Delivery::CopyOnly).await;
+        match result {
+            Ok(()) => {
+                let _ = app_bg.emit("tray:notice", "Retry done, copied to clipboard");
+            }
+            Err(e) => {
+                warn!("Retry pipeline echec: {e}");
+                mark_failed(&app_bg, &e.to_string());
+                let _ = app_bg.emit("tray:notice", format!("Retry failed: {e}"));
+                let _ = app_bg.emit(
+                    "pipeline:state",
+                    PipelineEvent {
+                        state: PipelineState::Failed,
+                        message: Some(e.to_string()),
+                        text: None,
+                        duration_ms: None,
+                    },
+                );
+            }
+        }
+        unload_inference_models(&app_bg);
         clear_history_id(&app_bg);
     });
 }
@@ -464,7 +511,7 @@ async fn transcribe_cloud(
     Ok((text, start.elapsed().as_millis() as u64))
 }
 
-async fn run_pipeline(app: AppHandle, wav_path: PathBuf) -> Result<()> {
+async fn run_pipeline(app: AppHandle, wav_path: PathBuf, delivery: Delivery) -> Result<()> {
     let source = resolve_source(&app);
     let language = get_language(&app);
     let params = WhisperParams {
@@ -508,7 +555,7 @@ async fn run_pipeline(app: AppHandle, wav_path: PathBuf) -> Result<()> {
             &format!("{provider} / {model}"),
             language.as_deref(),
         );
-        return finalize_text(&app, text, duration_ms).await;
+        return finalize_text(&app, text, duration_ms, delivery).await;
     }
 
     // Branche Parakeet (local via parakeet-rs).
@@ -551,7 +598,7 @@ async fn run_pipeline(app: AppHandle, wav_path: PathBuf) -> Result<()> {
             &format!("parakeet / {model_id}"),
             language.as_deref(),
         );
-        return finalize_text(&app, text, duration_ms).await;
+        return finalize_text(&app, text, duration_ms, delivery).await;
     }
 
     // Branche locale Whisper (comme avant).
@@ -627,7 +674,7 @@ async fn run_pipeline(app: AppHandle, wav_path: PathBuf) -> Result<()> {
         &format!("local / {model_id}"),
         language.as_deref(),
     );
-    finalize_text(&app, text, duration_ms).await
+    finalize_text(&app, text, duration_ms, delivery).await
 }
 
 fn mark_transcribed_in_history(
@@ -696,7 +743,12 @@ fn mark_enhanced_in_history(
 /// Post-traitement + paste commun aux branches locale et cloud.
 /// Ordre VoiceInk TranscriptionPipeline.swift L67-100 :
 ///   filter -> trim -> formatter (si active) -> word_replacement -> paste.
-async fn finalize_text(app: &AppHandle, text: String, duration_ms: u64) -> Result<()> {
+async fn finalize_text(
+    app: &AppHandle,
+    text: String,
+    duration_ms: u64,
+    delivery: Delivery,
+) -> Result<()> {
     let fillers = if filler_words::is_enabled(app) {
         filler_words::current_list(app)
     } else {
@@ -800,24 +852,32 @@ async fn finalize_text(app: &AppHandle, text: String, duration_ms: u64) -> Resul
         },
     );
 
-    let append_space = get_append_trailing_space(app);
-    let restore = get_restore_clipboard(app);
-    let final_text = if append_space {
-        format!("{text} ")
+    if delivery == Delivery::CopyOnly {
+        // Retry : presse-papiers uniquement, texte brut sans espace final.
+        let copy_text = text.clone();
+        task::spawn_blocking(move || crate::paste::copy_to_clipboard(&copy_text))
+            .await
+            .map_err(|e| anyhow!("task join: {e}"))??;
     } else {
-        text.clone()
-    };
+        let append_space = get_append_trailing_space(app);
+        let restore = get_restore_clipboard(app);
+        let final_text = if append_space {
+            format!("{text} ")
+        } else {
+            text.clone()
+        };
 
-    let final_text_clone = final_text.clone();
-    task::spawn_blocking(move || paste_at_cursor(&final_text_clone, restore, None))
-        .await
-        .map_err(|e| anyhow!("task join: {e}"))??;
+        let final_text_clone = final_text.clone();
+        task::spawn_blocking(move || paste_at_cursor(&final_text_clone, restore, None))
+            .await
+            .map_err(|e| anyhow!("task join: {e}"))??;
 
-    // Stop cue, played once the text is actually inserted at the cursor
-    // (VoiceInk SoundManager.playStopSound at TranscriptionPipeline.swift:209).
-    // Only reached for non-empty transcriptions (empty text returns earlier),
-    // so the cue doubles as a "text inserted" confirmation.
-    feedback::play(app, Cue::Stop);
+        // Stop cue, played once the text is actually inserted at the cursor
+        // (VoiceInk SoundManager.playStopSound at TranscriptionPipeline.swift:209).
+        // Only reached for non-empty transcriptions (empty text returns earlier),
+        // so the cue doubles as a "text inserted" confirmation.
+        feedback::play(app, Cue::Stop);
+    }
 
     let _ = app.emit(
         "pipeline:state",

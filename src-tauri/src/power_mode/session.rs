@@ -315,6 +315,40 @@ pub fn enabled_configs(app: &AppHandle) -> Vec<PowerModeConfig> {
 ///
 /// Reference VoiceInk : MiniRecorderShortcutManager.setupPowerModeHandler ->
 /// setActiveConfiguration + PowerModeSessionManager.beginSession(with:).
+/// Selection manuelle d'un profil par id (menu tray "Power Mode: X").
+/// Pendant un enregistrement : comme `select_by_index` (baseline conservee).
+/// Hors enregistrement : applique le profil et le marque actif, sans
+/// session (VoiceInk MenuBarView -> ModeManager.setActiveConfiguration).
+pub fn select_by_id(app: &AppHandle, id: &str) -> Option<PowerSession> {
+    let configs = enabled_configs(app);
+    let index = configs.iter().position(|c| c.id == id)?;
+    let has_session = current(app).is_some();
+    if has_session {
+        return select_by_index(app, index);
+    }
+    let cfg = &configs[index];
+    if let Err(e) = apply(app, cfg) {
+        warn!("power_mode select_by_id apply: {e}");
+        return None;
+    }
+    let _ = config::set_active_id(app, Some(&cfg.id));
+    info!(config = %cfg.name, "Power Mode selectionne depuis le tray");
+    None
+}
+
+/// Identifiant du profil effectif pour l'affichage : session en cours,
+/// sinon dernier profil marque actif s'il est toujours active.
+pub fn effective_config_id(app: &AppHandle) -> Option<String> {
+    if let Some(s) = current(app) {
+        return Some(s.config_id);
+    }
+    let id = config::active_id(app)?;
+    enabled_configs(app)
+        .into_iter()
+        .find(|c| c.id == id)
+        .map(|c| c.id)
+}
+
 pub fn select_by_index(app: &AppHandle, index: usize) -> Option<PowerSession> {
     let state = app.try_state::<PowerSessionState>()?;
     let configs = enabled_configs(app);

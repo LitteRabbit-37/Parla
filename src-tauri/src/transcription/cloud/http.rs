@@ -6,14 +6,32 @@
 // (pattern repris de enhancement/providers/openai_compat.rs).
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use reqwest::multipart::Part;
 
-/// Timeout total pour une requete batch (upload + traitement cote provider).
-/// 120s est large : Whisper large sur 30min d'audio prend ~30-60s cote cloud.
-pub const BATCH_TIMEOUT: Duration = Duration::from_secs(120);
+/// Timeout total par defaut pour une requete batch (upload + traitement
+/// cote provider). Reference VoiceInk AppDefaults
+/// `CloudTranscriptionSettings` : defaut 30 s, plage 10 s .. 30 min
+/// (commit 1bab779 "Add configurable cloud transcription timeout").
+pub const DEFAULT_BATCH_TIMEOUT_SECS: u64 = 30;
+pub const MIN_BATCH_TIMEOUT_SECS: u64 = 10;
+pub const MAX_BATCH_TIMEOUT_SECS: u64 = 30 * 60;
+
+/// Timeout courant, initialise depuis le store au boot
+/// (commands::settings::cloud_timeout_secs) et mis a jour a chaud.
+static BATCH_TIMEOUT_SECS: AtomicU64 = AtomicU64::new(DEFAULT_BATCH_TIMEOUT_SECS);
+
+pub fn set_batch_timeout_secs(secs: u64) {
+    let clamped = secs.clamp(MIN_BATCH_TIMEOUT_SECS, MAX_BATCH_TIMEOUT_SECS);
+    BATCH_TIMEOUT_SECS.store(clamped, Ordering::Relaxed);
+}
+
+pub fn batch_timeout() -> Duration {
+    Duration::from_secs(BATCH_TIMEOUT_SECS.load(Ordering::Relaxed))
+}
 
 /// Timeout pour l'etablissement de la connexion TCP/TLS.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -22,7 +40,7 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// A utiliser partout a la place de `reqwest::Client::new()`.
 pub fn batch_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
-        .timeout(BATCH_TIMEOUT)
+        .timeout(batch_timeout())
         .connect_timeout(CONNECT_TIMEOUT)
         .build()
         .map_err(|e| anyhow!("http client: {e}"))

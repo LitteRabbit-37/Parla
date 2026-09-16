@@ -82,12 +82,27 @@ export function RecorderPanel() {
 
   async function refreshDevices() {
     try {
-      const list = await api.listAudioDevices();
+      const [list, stored] = await Promise.all([
+        api.listAudioDevices(),
+        api.getSelectedInputDevice(),
+      ]);
       setDevices(list);
-      if (selected == null) {
-        const def = list.find((d) => d.is_default);
-        if (def) setSelected(def.name);
+      // Micro persiste (reglages / menu tray) s'il est toujours branche,
+      // sinon defaut systeme (VoiceInk AudioDeviceManager fallback).
+      if (stored && list.some((d) => d.name === stored)) {
+        setSelected(stored);
+      } else {
+        setSelected(null);
       }
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function chooseDevice(name: string | null) {
+    setSelected(name);
+    try {
+      await api.setSelectedInputDevice(name);
     } catch (e) {
       setError(String(e));
     }
@@ -131,11 +146,14 @@ export function RecorderPanel() {
           <div className="flex gap-2">
             <select
               value={selected ?? ""}
-              onChange={(e) => setSelected(e.target.value || null)}
+              onChange={(e) => chooseDevice(e.target.value || null)}
               disabled={isRecording}
               className="flex h-9 flex-1 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm disabled:opacity-50"
             >
               {devices.length === 0 && <option value="">{t("recorder.noDevice")}</option>}
+              {devices.length > 0 && (
+                <option value="">{t("recorder.systemDefault")}</option>
+              )}
               {devices.map((d) => (
                 <option key={d.name} value={d.name}>
                   {d.name} {d.is_default ? t("recorder.defaultLabel") : ""} - {d.default_sample_rate} Hz /{" "}

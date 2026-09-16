@@ -174,7 +174,10 @@
     "textFormatting": "Mise en forme du texte",
     "textFormattingDescription": "Applique la casse de phrase, les majuscules et la ponctuation.",
     "removeFillers": "Supprimer les mots de remplissage",
-    "fillerList": "Liste des mots de remplissage (separes par virgules)"
+    "fillerList": "Liste des mots de remplissage (separes par virgules)",
+    "liveTranscript": "Texte en direct",
+    "liveTranscriptInfo": "Affiche le texte en direct pendant l'enregistrement avec les modeles temps reel (providers cloud en streaming).",
+    "liveTranscriptDescription": "La bulle d'enregistrement affiche le texte au fur et a mesure que vous parlez."
   },
   "onboarding": {
     "welcome": {
@@ -397,7 +400,8 @@
     "keySavedOk": "OK, cle enregistree",
     "keyDeleted": "Cle supprimee",
     "activePrompt": "Prompt actif",
-    "predefined": "(predefini)"
+    "predefined": "(predefini)",
+    "currentModel": "{{model}} (actuel)"
   },
   "screenContext": {
     "title": "Contexte fenetre active (OCR)",
@@ -513,7 +517,8 @@
       "toggle": "Bascule",
       "pushToTalk": "Push-to-talk",
       "hybrid": "Hybride"
-    }
+    },
+    "systemDefault": "Defaut systeme"
   },
   "transcribe": {
     "title": "Transcription locale",
@@ -625,7 +630,8 @@
     "powerMode": "Power Mode",
     "noConfigs": "Aucune config definie. Cree un profil pour que Parla bascule automatiquement prompt + LLM + source selon l'app active.",
     "openPowerMode": "Ouvrir Power Mode",
-    "autoSwitch": "Bascule automatiquement selon l'application courante. Alt+chiffre pour choisir un profil a la main."
+    "autoSwitch": "Bascule automatiquement selon l'application courante. Alt+chiffre pour choisir un profil a la main.",
+    "escapeHint": "Appuyez encore sur Echap pour annuler"
   },
   "promptDetection": {
     "triggerDetected": "Mot declencheur detecte : {{word}}",
@@ -640,7 +646,14 @@
     "noWhisper": "Aucun modele Whisper selectionne. Ouvre Modeles IA et choisis-en un.",
     "noParakeet": "Aucun modele Parakeet selectionne. Ouvre Modeles IA et choisis-en un.",
     "parakeetIncomplete": "Le modele Parakeet {{model}} est incomplet. Re-telecharge-le depuis Modeles IA.",
-    "cloudUnconfigured": "Aucun provider cloud ou modele selectionne. Ouvre Modeles IA et configure-en un."
+    "cloudUnconfigured": "Aucun provider cloud ou modele selectionne. Ouvre Modeles IA et configure-en un.",
+    "shortcutConflict": "Raccourci deja utilise par {{b}} ({{a}}).",
+    "shortcutReserved": "Alt+chiffre est reserve aux profils Power Mode pendant l'enregistrement ({{action}}).",
+    "shortcutNeedsModifier": "Cette touche necessite un modificateur (Ctrl, Alt, Shift ou Win) ({{action}}).",
+    "historyEmpty": "L'historique est vide.",
+    "lastTranscriptionEmpty": "La derniere transcription est vide.",
+    "audioMissing": "Impossible de reessayer : le fichier audio de la derniere transcription est introuvable.",
+    "recordingInProgress": "Un enregistrement est en cours."
   },
   "prompts": {
     "default": {
@@ -688,6 +701,38 @@
       "waiting": "Presse ta combinaison...",
       "needsModifier": "Une touche seule n'est autorisee que pour F1-F24, Insert, Delete, Home, End, PageUp/Down, Pause, PrintScreen. Sinon ajoute Ctrl, Alt, Shift ou Win."
     },
-    "editCombo": "Cliquer pour modifier la combinaison"
+    "editCombo": "Cliquer pour modifier la combinaison",
+    "additional": {
+      "cardTitle": "Raccourcis additionnels",
+      "cardDescription": "Raccourcis globaux pour la derniere transcription et pour annuler un enregistrement. Non definis par defaut.",
+      "copyLast": "Copier la derniere transcription",
+      "copyLastHint": "Copie la derniere transcription (texte ameliore si disponible) dans le presse-papiers. Aussi disponible dans le menu de l'icone.",
+      "pasteLast": "Coller la derniere transcription (originale)",
+      "pasteLastEnhanced": "Coller la derniere transcription (amelioree)",
+      "retryLast": "Reessayer la derniere transcription",
+      "retryLastHint": "Retranscrit le dernier enregistrement avec le modele et l'enhancement actuels, copie le resultat dans le presse-papiers et l'ajoute a l'historique.",
+      "openHistory": "Ouvrir l'historique",
+      "cancelRecording": "Annuler l'enregistrement",
+      "cancelHint": "Le raccourci choisi annule l'enregistrement. Reinitialiser restaure le double Echap par defaut.",
+      "cancelDefault": "Echap, Echap",
+      "notSet": "Non defini",
+      "record": "Enregistrer un raccourci",
+      "clear": "Effacer",
+      "reset": "Reinitialiser",
+      "actionNames": {
+        "primary": "Raccourci d'enregistrement principal",
+        "secondary": "Raccourci d'enregistrement secondaire",
+        "cancelRecording": "Annuler l'enregistrement",
+        "copyLast": "Copier la derniere transcription",
+        "pasteLast": "Coller la derniere transcription (originale)",
+        "pasteLastEnhanced": "Coller la derniere transcription (amelioree)",
+        "retryLast": "Reessayer la derniere transcription",
+        "openHistory": "Ouvrir l'historique"
+      }
+    }
+  },
+  "cloudTimeout": {
+    "title": "Delai de transcription cloud",
+    "description": "Temps maximum d'attente d'une reponse du provider cloud. 30 secondes par defaut."
   }
 }

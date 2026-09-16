@@ -158,6 +158,14 @@ pub fn save_all(app: &AppHandle, list: &[PowerModeConfig]) -> Result<()> {
     store.save().map_err(|e| anyhow!("store save: {e}"))
 }
 
+/// Identifiant du profil marque actif (dernier applique), `None` sinon.
+pub fn active_id(app: &AppHandle) -> Option<String> {
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|s| s.get(KEY_ACTIVE_ID))
+        .and_then(|v| v.as_str().map(String::from))
+}
+
 pub fn set_active_id(app: &AppHandle, id: Option<&str>) -> Result<()> {
     let store = app
         .store(STORE_FILE)

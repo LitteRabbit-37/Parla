@@ -4,3 +4,4 @@
 
 pub mod cleanup;
 pub mod export;
+pub mod last_transcription;

@@ -27,11 +27,9 @@ use crate::enhancement::provider::{
 
 pub struct AnthropicProvider;
 
+// VoiceInk 2.13 AIService.availableModels (.anthropic).
 const MODELS: &[&str] = &[
-    "claude-opus-4-6",
-    "claude-sonnet-4-6",
-    "claude-opus-4-5",
-    "claude-sonnet-4-5",
+    "claude-sonnet-5",
     "claude-haiku-4-5",
 ];
 
@@ -50,7 +48,7 @@ impl LLMProvider for AnthropicProvider {
         MODELS
     }
     fn default_model(&self) -> &'static str {
-        "claude-sonnet-4-6"
+        "claude-sonnet-5"
     }
     fn endpoint(&self) -> &'static str {
         "https://api.anthropic.com/v1/messages"

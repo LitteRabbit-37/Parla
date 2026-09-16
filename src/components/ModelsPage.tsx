@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
+import { CloudTimeoutPanel } from "@/components/CloudTimeoutPanel";
 import { DictationLanguagePanel } from "@/components/DictationLanguagePanel";
 import { CloudModelCard } from "@/components/models/CloudModelCard";
 import { DefaultModelCard } from "@/components/models/DefaultModelCard";
@@ -370,6 +371,8 @@ export function ModelsPage({
       <DefaultModelCard displayName={defaultDisplayName} />
 
       <DictationLanguagePanel />
+
+      <CloudTimeoutPanel />
 
       <ModelFilterPills value={filter} onChange={setFilter} />
 
