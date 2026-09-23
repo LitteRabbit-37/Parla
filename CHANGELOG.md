@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-23
+
 Bug-fix release: the clipboard crash reported in issue #13, plus the VoiceInk
 2.13 catch-up items that were left out of 0.6.0 (Unicode word boundaries,
 trigger-word priority, refreshed enhancement prompts, cloud model ids).
