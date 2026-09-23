@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Bug-fix release: the clipboard crash reported in issue #13, plus the VoiceInk
+2.13 catch-up items that were left out of 0.6.0 (Unicode word boundaries,
+trigger-word priority, refreshed enhancement prompts, cloud model ids).
+
+### Fixed
+- Crash `STATUS_HEAP_CORRUPTION` (0xc0000374) after a dictation when an image was on the clipboard (issue #13). The clipboard backup enumerated every format and treated each handle as global memory; Windows synthesizes `CF_BITMAP` from `CF_DIB` whenever an image is copied, so an `HBITMAP` ended up in `GlobalSize`, which is undefined behaviour and kills the process on some machines. The backup and the restore now skip every non-`HGLOBAL` format: `CF_BITMAP`, `CF_PALETTE`, `CF_METAFILEPICT`, `CF_ENHMETAFILE`, `CF_OWNERDISPLAY`, the `CF_DSP*` variants, the private range (0x200-0x2FF) and the GDI object range (0x300-0x3FF). Images are still preserved through `CF_DIB` / `CF_DIBV5` / PNG and Windows re-synthesizes `CF_BITMAP` on restore. Present since 0.1.0.
+- Word replacements no longer match inside words containing non-ASCII letters (VoiceInk commit 491f581): a rule `ERN -> EAN` used to turn "vergrößern" into "vergrößEAN" because the boundary class was `[a-zA-Z0-9]`. Word characters are now Unicode letters, marks and digits, with the non-spaced scripts (Han, Hiragana, Katakana, Hangul, Thai) exempted so a Latin term flush against CJK text still matches.
+- The clipboard is restored even when the Ctrl+V simulation fails (VoiceInk `CursorPaster`, commit 8ce493d); previously a failed paste left the transcript in the clipboard and dropped the user's previous content.
+- Trigger words are resolved like VoiceInk `ModeTriggerWordDetectionService`: candidates from all prompts are sorted by trigger length first, then prompt order, so "hey claude" on one prompt beats "hey" on another. Trigger words are also normalized on save (trimmed, empty entries dropped, case-insensitive duplicates removed).
+
+### Changed
+- Enhancement prompts rewritten to VoiceInk 2.13 (`Core/Enhancement/AIPrompts.swift`, `PromptTemplates.swift`, commits 5706e83 and eda5ccb): the system template is now the structured `<SYSTEM_INSTRUCTIONS>` block (task, rules, context rules, task instructions, worked examples, output requirements) with explicit self-correction handling, spoken number / currency / date normalization, paragraph and list rules and a prompt-injection guard. The predefined Default and Assistant prompts are refreshed automatically on launch (they are read-only in Parla, like VoiceInk's predefined prompts), user-created prompts are untouched. The optional Chat, Email and Rewrite templates use the VoiceInk 2.13 texts; Rewrite is a full instruction block like in VoiceInk.
+- Cloud transcription model ids aligned on VoiceInk 2.13: AssemblyAI `universal-3-5-pro` (batch + realtime, `mode=balanced`, up to 1000 key terms) and `universal-2` (batch only, 200 key terms), following LLMkit 95b29c2 which no longer sends a prompt; Soniox `stt-async-v5` / `stt-rt-v5`; Cartesia `ink-2` (English only). Previously selected ids keep working: the old AssemblyAI ids are mapped to their successor, the Soniox v4 ids are passed through. Gemini transcription keeps the 2.5 models for now: VoiceInk's `gemini-3.5-transcribe` uses a different API (Files upload + `interactions`), which will come with Gemini streaming.
+- ElevenLabs streaming sends `no_verbatim=true` (VoiceInk fix for #808, disfluencies removed like in batch) and the custom vocabulary as `keyterms` (trimmed, 20 characters max, 50 terms), matching LLMkit's `ElevenLabsStreamingClient`.
+
+
 ## [0.6.0] - 2026-09-16
 
 Feature release catching up with VoiceInk 2.x on shortcuts and the recorder

@@ -73,7 +73,7 @@ pub enum StreamingEvent {
 }
 
 /// Configuration de la session.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct StreamingConfig {
     pub model: String,
     pub language: Option<String>,

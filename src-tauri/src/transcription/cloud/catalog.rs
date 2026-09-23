@@ -69,19 +69,10 @@ const XAI_LANGS: &[&str] = &[
 const ASSEMBLYAI_LANGS: &[&str] =
     &["auto", "de", "en", "es", "fr", "it", "pt"];
 
-/// Cartesia Ink Whisper : 100 langues, PAS d'auto-detect (langue
-/// obligatoire dans la query string). Source CartesiaProvider.swift.
-const CARTESIA_LANGS: &[&str] = &[
-    "af", "am", "ar", "as", "az", "ba", "be", "bg", "bn", "bo", "br", "bs",
-    "ca", "cs", "cy", "da", "de", "el", "en", "es", "et", "eu", "fa", "fi",
-    "fo", "fr", "gl", "gu", "ha", "haw", "he", "hi", "hr", "ht", "hu", "hy",
-    "id", "is", "it", "ja", "jw", "ka", "kk", "km", "kn", "ko", "la", "lb",
-    "ln", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt",
-    "my", "ne", "nl", "nn", "no", "oc", "pa", "pl", "ps", "pt", "ro", "ru",
-    "sa", "sd", "si", "sk", "sl", "sn", "so", "sq", "sr", "su", "sv", "sw",
-    "ta", "te", "tg", "th", "tk", "tl", "tr", "tt", "uk", "ur", "uz", "vi",
-    "yi", "yo", "yue", "zh", "zu",
-];
+/// Cartesia Ink 2 : anglais uniquement, PAS d'auto-detect (langue
+/// obligatoire dans la query string). Source CartesiaProvider.swift
+/// (VoiceInk 2.x, commit "Update Cartesia streaming to Ink 2 English-only").
+const CARTESIA_LANGS: &[&str] = &["en"];
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CloudProviderInfo {
@@ -276,8 +267,8 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
     // Soniox
     CloudModelInfo {
         provider_id: "soniox",
-        model_id: "stt-async-v4",
-        display_name: "Soniox V4 Async",
+        model_id: "stt-async-v5",
+        display_name: "Soniox V5 Async",
         supports_batch: true,
         supports_streaming: false,
         multilingual: true,
@@ -288,8 +279,8 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
     },
     CloudModelInfo {
         provider_id: "soniox",
-        model_id: "stt-rt-v4",
-        display_name: "Soniox V4 Realtime",
+        model_id: "stt-rt-v5",
+        display_name: "Soniox V5 Realtime",
         supports_batch: false,
         supports_streaming: true,
         multilingual: true,
@@ -353,12 +344,12 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
     // Cartesia
     CloudModelInfo {
         provider_id: "cartesia",
-        model_id: "ink-whisper",
-        display_name: "Ink Whisper (Cartesia)",
+        model_id: "ink-2",
+        display_name: "Ink 2 (Cartesia)",
         supports_batch: false,
         supports_streaming: true,
-        multilingual: true,
-        notes: "Streaming-only, optimise pour les agents vocaux temps reel. 100 langues, sans auto-detect.",
+        multilingual: false,
+        notes: "Streaming-only, le plus rapide de Cartesia. Anglais uniquement, sans auto-detect.",
         speed: 0.99,
         accuracy: 0.94,
         language_codes: CARTESIA_LANGS,
@@ -366,24 +357,24 @@ pub const CLOUD_MODELS: &[CloudModelInfo] = &[
     // AssemblyAI
     CloudModelInfo {
         provider_id: "assemblyai",
-        model_id: "universal-3-pro",
-        display_name: "Universal-3 Pro (AssemblyAI)",
+        model_id: "universal-3-5-pro",
+        display_name: "Universal-3.5 Pro (AssemblyAI)",
         supports_batch: true,
         supports_streaming: true,
         multilingual: true,
-        notes: "Modele AssemblyAI le plus precis avec realtime. Batch via upload + poll.",
+        notes: "Modele AssemblyAI le plus precis, avec realtime. Batch via upload + poll.",
         speed: 0.94,
         accuracy: 0.98,
         language_codes: ASSEMBLYAI_LANGS,
     },
     CloudModelInfo {
         provider_id: "assemblyai",
-        model_id: "universal-streaming",
+        model_id: "universal-2",
         display_name: "Universal-2 (AssemblyAI)",
         supports_batch: true,
-        supports_streaming: true,
+        supports_streaming: false,
         multilingual: true,
-        notes: "Universal-2 streaming auto-detect, plus rapide que Universal-3 Pro.",
+        notes: "Universal-2 batch, 90+ langues. Plus rapide que Universal-3.5 Pro, sans realtime (VoiceInk 2.13).",
         speed: 0.96,
         accuracy: 0.92,
         language_codes: ASSEMBLYAI_LANGS,

@@ -1,4 +1,4 @@
-// Soniox stt-async-v4 en batch (multi-step).
+// Soniox stt-async-v5 en batch (multi-step). Le modele vient du catalogue.
 //
 // Reference VoiceInk : LLMkit SonioxClient.swift.
 // Sequence :

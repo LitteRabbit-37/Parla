@@ -115,7 +115,10 @@ pub fn paste_at_cursor(text: &str, restore: bool, restore_delay: Option<Duration
     #[cfg(windows)]
     restore_foreground();
 
-    send_ctrl_v()?;
+    // Le presse-papiers est restaure meme si le Ctrl+V echoue (VoiceInk
+    // CursorPaster, commit 8ce493d) : l'utilisateur ne doit jamais perdre
+    // ce qu'il avait copie a cause d'un collage rate.
+    let paste_result = send_ctrl_v();
 
     if let Some(prev) = backup {
         let delay = restore_delay.unwrap_or(MIN_RESTORE_DELAY).max(MIN_RESTORE_DELAY);
@@ -134,7 +137,7 @@ pub fn paste_at_cursor(text: &str, restore: bool, restore_delay: Option<Duration
         }
     }
 
-    Ok(())
+    paste_result
 }
 
 #[cfg(windows)]

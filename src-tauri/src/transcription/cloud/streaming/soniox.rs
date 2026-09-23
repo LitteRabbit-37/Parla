@@ -1,4 +1,4 @@
-// Soniox stt-rt-v4 realtime.
+// Soniox stt-rt-v5 realtime (VoiceInk SonioxStreamingProvider). Le modele vient du catalogue.
 //
 // Reference VoiceInk : LLMkit SonioxStreamingClient.swift.
 // WSS : wss://stt-rt.soniox.com/transcribe-websocket

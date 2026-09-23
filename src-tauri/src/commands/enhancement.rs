@@ -35,6 +35,7 @@ pub fn add_prompt(app: AppHandle, prompt: CustomPrompt) -> Result<CustomPrompt, 
     if p.id.is_empty() {
         p.id = prompts::new_uuid();
     }
+    p.trigger_words = prompts::normalize_trigger_words(p.trigger_words);
     all.push(p.clone());
     prompts::save_all(&app, &all).map_err(|e| e.to_string())?;
     prompts::invalidate_cache();
@@ -48,6 +49,8 @@ pub fn update_prompt(app: AppHandle, prompt: CustomPrompt) -> Result<(), String>
         .iter()
         .position(|p| p.id == prompt.id)
         .ok_or_else(|| format!("prompt introuvable: {}", prompt.id))?;
+    let mut prompt = prompt;
+    prompt.trigger_words = prompts::normalize_trigger_words(prompt.trigger_words);
     all[pos] = prompt;
     prompts::save_all(&app, &all).map_err(|e| e.to_string())?;
     prompts::invalidate_cache();

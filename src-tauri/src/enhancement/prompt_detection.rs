@@ -1,18 +1,23 @@
 // Detection de trigger_words dans une transcription.
 //
-// Reference VoiceInk : VoiceInk/Services/PromptDetectionService.swift.
+// Reference VoiceInk : Features/Modes/Models/ModeTriggerWordDetectionService.swift
+// (VoiceInk 2.x : les mots declencheurs sont portes par les modes ; Parla
+// les porte encore par les prompts, meme algorithme).
 //
 // Objectif : si la transcription contient (en prefixe ou suffixe) un des
 // trigger_words d'un prompt custom, activer l'enhancement avec CE prompt
 // et stripper le trigger du texte.
 //
-// Algorithme (aligne VoiceInk detectAndStripTriggerWord L153) :
-//   1. Filtrer les triggers vides, trier par longueur decroissante pour
-//      matcher le plus specifique.
-//   2. Tenter d'abord stripTrailing puis stripLeading. Si trailing match,
-//      tenter leading sur le reste (cas prefix ET suffix).
-//   3. Si trailing echoue pour un trigger, passer au leading dans une
-//      seconde passe.
+// Algorithme (aligne VoiceInk `detect(in:configurations:)`) :
+//   1. Construire la liste de TOUS les candidats (prompt, trigger) de tous
+//      les prompts, triggers vides ignores.
+//   2. Trier par longueur de trigger decroissante, puis ordre du prompt,
+//      puis ordre du trigger : le declencheur le plus long gagne, quel que
+//      soit le prompt qui le porte (avant la 0.6.1 Parla parcourait les
+//      prompts dans l'ordre, un "hey" du premier prompt volait le
+//      "hey claude" du second).
+//   3. Pour chaque candidat : stripTrailing puis stripLeading sur le reste
+//      (prefixe ET suffixe) ; sinon stripLeading puis stripTrailing.
 //   4. Matching insensible a la casse, exige frontiere de mot (char
 //      adjacent pas lettre/chiffre). Nettoyage ponctuation entourante
 //      et capitalisation de la premiere lettre restante.
@@ -26,55 +31,62 @@ pub struct PromptDetectionResult {
     pub trigger_word: String,
 }
 
-/// Analyse un texte et retourne le premier prompt dont un trigger_word
-/// est detecte en prefixe ou suffixe. None si aucun match.
+/// Analyse un texte et retourne le prompt dont un trigger_word est detecte
+/// en prefixe ou suffixe, le declencheur le plus long de tous les prompts
+/// etant essaye en premier. None si aucun match.
 pub fn detect_and_strip(prompts: &[CustomPrompt], text: &str) -> Option<PromptDetectionResult> {
-    for prompt in prompts {
-        if prompt.trigger_words.is_empty() {
-            continue;
+    struct Candidate<'a> {
+        prompt: &'a CustomPrompt,
+        trigger: String,
+        prompt_index: usize,
+        word_index: usize,
+    }
+
+    let mut candidates: Vec<Candidate<'_>> = Vec::new();
+    for (prompt_index, prompt) in prompts.iter().enumerate() {
+        for (word_index, word) in prompt.trigger_words.iter().enumerate() {
+            let trimmed = word.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            candidates.push(Candidate {
+                prompt,
+                trigger: trimmed.to_string(),
+                prompt_index,
+                word_index,
+            });
         }
-        if let Some((word, processed)) =
-            detect_and_strip_trigger_word(text, &prompt.trigger_words)
-        {
+    }
+
+    candidates.sort_by(|a, b| {
+        b.trigger
+            .chars()
+            .count()
+            .cmp(&a.trigger.chars().count())
+            .then(a.prompt_index.cmp(&b.prompt_index))
+            .then(a.word_index.cmp(&b.word_index))
+    });
+
+    for c in candidates {
+        if let Some(processed) = detect_and_strip_single(text, &c.trigger) {
             return Some(PromptDetectionResult {
-                prompt_id: prompt.id.clone(),
+                prompt_id: c.prompt.id.clone(),
                 processed_text: processed,
-                trigger_word: word,
+                trigger_word: c.trigger,
             });
         }
     }
     None
 }
 
-fn detect_and_strip_trigger_word(
-    text: &str,
-    trigger_words: &[String],
-) -> Option<(String, String)> {
-    let mut trimmed: Vec<String> = trigger_words
-        .iter()
-        .map(|w| w.trim().to_string())
-        .filter(|w| !w.is_empty())
-        .collect();
-    // Tri par longueur decroissante (plus specifique d'abord).
-    trimmed.sort_by_key(|b| std::cmp::Reverse(b.chars().count()));
-
-    // Premiere passe : trailing prioritaire (VoiceInk L160).
-    for trigger in &trimmed {
-        if let Some(after_trailing) = strip_trailing_trigger_word(text, trigger) {
-            if let Some(after_both) = strip_leading_trigger_word(&after_trailing, trigger) {
-                return Some((trigger.clone(), after_both));
-            }
-            return Some((trigger.clone(), after_trailing));
-        }
+/// VoiceInk `detectAndStrip(from:triggerWord:)` : suffixe d'abord (puis
+/// prefixe sur le reste), sinon prefixe (puis suffixe sur le reste).
+fn detect_and_strip_single(text: &str, trigger: &str) -> Option<String> {
+    if let Some(after) = strip_trailing_trigger_word(text, trigger) {
+        return Some(strip_leading_trigger_word(&after, trigger).unwrap_or(after));
     }
-    // Seconde passe : leading uniquement (VoiceInk L169).
-    for trigger in &trimmed {
-        if let Some(after_leading) = strip_leading_trigger_word(text, trigger) {
-            if let Some(after_both) = strip_trailing_trigger_word(&after_leading, trigger) {
-                return Some((trigger.clone(), after_both));
-            }
-            return Some((trigger.clone(), after_leading));
-        }
+    if let Some(after) = strip_leading_trigger_word(text, trigger) {
+        return Some(strip_trailing_trigger_word(&after, trigger).unwrap_or(after));
     }
     None
 }
@@ -243,13 +255,35 @@ mod tests {
     }
 
     #[test]
-    fn multi_prompt_first_match_wins() {
+    fn multi_prompt_only_matching_prompt_wins() {
         let prompts = vec![
             prompt("assistant", &["hey claude"]),
             prompt("email", &["mail"]),
         ];
         let r = detect_and_strip(&prompts, "mail bonjour").unwrap();
         assert_eq!(r.prompt_id, "email");
+    }
+
+    #[test]
+    fn longest_trigger_wins_across_prompts() {
+        // VoiceInk ModeTriggerWordDetectionService : les candidats de tous
+        // les prompts sont tries par longueur. "hey claude" (2e prompt) doit
+        // battre "hey" (1er prompt) meme si ce dernier matche aussi.
+        let prompts = vec![
+            prompt("chat", &["hey"]),
+            prompt("assistant", &["hey claude"]),
+        ];
+        let r = detect_and_strip(&prompts, "hey claude what time is it").unwrap();
+        assert_eq!(r.prompt_id, "assistant");
+        assert_eq!(r.trigger_word, "hey claude");
+        assert_eq!(r.processed_text, "What time is it");
+    }
+
+    #[test]
+    fn equal_length_keeps_prompt_order() {
+        let prompts = vec![prompt("first", &["mail"]), prompt("second", &["MAIL"])];
+        let r = detect_and_strip(&prompts, "mail bonjour").unwrap();
+        assert_eq!(r.prompt_id, "first");
     }
 
     #[test]

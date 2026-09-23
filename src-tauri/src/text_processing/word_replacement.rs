@@ -1,10 +1,13 @@
 // Service d'application des remplacements de mots sur le texte transcrit.
 //
-// Reference VoiceInk : Transcription/Processing/WordReplacementService.swift
+// Reference VoiceInk : Features/Dictionary/Workflows/WordReplacementService.swift
 // - CSV split des variantes originales
-// - Regex \\bORIGINAL\\b case-insensitive
+// - Regex case-insensitive avec lookarounds : un "caractere de mot" est une
+//   lettre / marque / chiffre Unicode (\p{L}\p{M}\p{N}), sauf les scripts
+//   sans espaces (Han, Hiragana, Katakana, Hangul, Thai) pour qu'un trigger
+//   latin colle a du CJK matche quand meme (commit 491f581).
 // - Fallback substring (case-insensitive) si l'original contient un scalaire
-//   dans les plages Hiragana/Katakana/CJK/Hangul/Thai (L58-64)
+//   dans les plages Hiragana/Katakana/CJK/Hangul/Thai
 
 use fancy_regex::Regex as FancyRegex;
 
@@ -45,13 +48,22 @@ pub fn apply(text: &str, rules: &[WordReplacement]) -> String {
     current
 }
 
+/// Caractere de mot au sens VoiceInk : lettre, marque combinante ou chiffre
+/// Unicode, sauf les scripts sans espaces (via Script_Extensions pour que les
+/// marques partagees comme le prolongateur U+30FC restent exemptees).
+/// La classe ASCII [a-zA-Z0-9] utilisee avant la 0.6.1 laissait une regle
+/// "ERN" matcher dans "vergrößern" (ö n'etait pas un caractere de mot).
+const WORD_CHAR: &str =
+    r"[\p{L}\p{M}\p{N}--[\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}\p{scx=Hangul}\p{scx=Thai}]]";
+
 fn replace_with_boundaries(haystack: &str, needle: &str, replacement: &str) -> String {
     // Lookarounds plutot que \b : la ponctuation devient frontiere (regle
     // "hello" matche "hello!") et "_" n'est plus traite comme word char.
-    // Cf VoiceInk WordReplacementService.swift commit 620a843. fancy-regex
-    // requis pour les lookarounds (le crate regex ne les supporte pas).
+    // Cf VoiceInk WordReplacementService.swift commits 620a843 + 491f581.
+    // fancy-regex requis pour les lookarounds (le crate regex ne les
+    // supporte pas).
     let escaped = fancy_regex::escape(needle);
-    let pattern = format!(r"(?i)(?<![a-zA-Z0-9]){escaped}(?![a-zA-Z0-9])");
+    let pattern = format!(r"(?i)(?<!{WORD_CHAR}){escaped}(?!{WORD_CHAR})");
     match FancyRegex::new(&pattern) {
         Ok(re) => re.replace_all(haystack, replacement).into_owned(),
         Err(_) => replace_substring_ci(haystack, needle, replacement),
@@ -189,6 +201,25 @@ mod tests {
         let rules = vec![rule("1", "hello", "Hi")];
         let out = apply("hello! Hello, world.", &rules);
         assert_eq!(out, "Hi! Hi, world.");
+    }
+
+    #[test]
+    fn unicode_letters_are_word_chars() {
+        // VoiceInk 491f581 : "ERN" ne doit pas matcher dans "vergrößern"
+        // (ö est une lettre), ni "cafe" dans "café" (e + accent) ni "ana"
+        // dans "mañana".
+        let rules = vec![rule("1", "ern", "EAN"), rule("2", "cafe", "coffee")];
+        let out = apply("vergrößern ern café cafe mañana", &rules);
+        assert_eq!(out, "vergrößern EAN café coffee mañana");
+    }
+
+    #[test]
+    fn latin_trigger_flush_against_cjk_still_matches() {
+        // Les scripts sans espaces sont exemptes : un trigger latin colle a
+        // du japonais / chinois / coreen / thai matche quand meme.
+        let rules = vec![rule("1", "hello", "Hi")];
+        let out = apply("日本語hello ハローhello 안녕hello สวัสดีhello", &rules);
+        assert_eq!(out, "日本語Hi ハローHi 안녕Hi สวัสดีHi");
     }
 
     #[test]

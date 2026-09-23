@@ -7,10 +7,12 @@
 //   3. Poll       : GET /v2/transcript/{id} chaque seconde         -> text quand status=completed
 // Auth : header `Authorization: <apiKey>` (PAS de Bearer cote AssemblyAI).
 //
-// Le mapping `speech_models` est repris de LLMkit (universal-3-pro inclut un
-// fallback universal-2 pour les langues non-pro). Le custom_vocabulary devient
-// `keyterms_prompt`, lui-meme normalise (max 50 chars / 6 mots / 100 entrees,
-// dedup case-insensitive). On retourne le texte final ou bail en cas d'erreur.
+// Le mapping `speech_models` est repris de LLMkit (revision 95b29c2 utilisee
+// par VoiceInk 2.13) : universal-3-5-pro et universal-2, sans fallback. Le
+// custom_vocabulary devient `keyterms_prompt`, normalise (max 50 chars /
+// 6 mots, dedup case-insensitive, 1000 entrees pour Universal-3.5 Pro et
+// 200 pour Universal-2). LLMkit n'envoie plus de `prompt`. On retourne le
+// texte final ou bail en cas d'erreur.
 
 use std::path::Path;
 use std::time::Duration;
@@ -28,7 +30,10 @@ pub struct AssemblyAiProvider;
 const API_BASE: &str = "https://api.assemblyai.com";
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 const POLL_MAX_WAIT: Duration = Duration::from_secs(300);
-const KEYTERMS_LIMIT: usize = 100;
+/// LLMkit AssemblyAIClient.normalizedKeyterms : 1000 pour Universal-3.5 Pro,
+/// 200 pour Universal-2.
+const KEYTERMS_LIMIT_U35: usize = 1_000;
+const KEYTERMS_LIMIT_U2: usize = 200;
 
 #[derive(Debug, Deserialize)]
 struct UploadResponse {
@@ -83,8 +88,11 @@ impl CloudTranscriptionProvider for AssemblyAiProvider {
 
         // 2. Cree le job
         let speech_models = speech_models_for(&request.model);
-        let primary = speech_models.first().copied().unwrap_or(&request.model);
-        let keyterms = normalize_keyterms(&request.custom_vocabulary);
+        let primary = speech_models
+            .first()
+            .cloned()
+            .unwrap_or_else(|| request.model.clone());
+        let keyterms = normalize_keyterms(&request.custom_vocabulary, keyterms_limit(&primary));
 
         let mut payload = serde_json::Map::new();
         payload.insert("audio_url".into(), json!(upload_url));
@@ -104,16 +112,7 @@ impl CloudTranscriptionProvider for AssemblyAiProvider {
             }
         }
 
-        let trimmed_prompt = request
-            .prompt
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        let supports_prompt = supports_prompt(&speech_models);
-        if supports_prompt && !trimmed_prompt.is_empty() {
-            payload.insert("prompt".into(), json!(append_keyterms(&keyterms, &trimmed_prompt)));
-        } else if !keyterms.is_empty() && supports_keyterms(primary) {
+        if !keyterms.is_empty() {
             payload.insert("keyterms_prompt".into(), json!(keyterms));
         }
 
@@ -202,36 +201,31 @@ async fn poll_transcript(
     }
 }
 
-/// Resolution VoiceInk LLMkit AssemblyAIClient.swift `speechModels(for:)`.
-/// `universal-3-pro` ajoute un fallback `universal-2` pour les langues non-pro.
-fn speech_models_for(model: &str) -> Vec<&str> {
+/// Resolution LLMkit AssemblyAIClient.swift `speechModels(for:)` (95b29c2).
+/// Les identifiants des versions precedentes de Parla (universal-3-pro,
+/// universal-streaming*) encore presents dans les reglages sont mappes sur
+/// leur successeur pour ne pas casser une selection existante.
+fn speech_models_for(model: &str) -> Vec<String> {
     match model {
-        "universal-3-pro" => vec!["universal-3-pro", "universal-2"],
-        "universal-2" => vec!["universal-2"],
-        "universal-streaming"
+        "universal-3-5-pro" | "universal-3-pro" | "u3-rt-pro" => vec!["universal-3-5-pro".into()],
+        "universal-2"
+        | "universal-streaming"
         | "universal-streaming-english"
         | "universal-streaming-multilingual"
-        | "whisper-rt" => vec!["universal-2"],
-        other => vec![other],
+        | "whisper-rt" => vec!["universal-2".into()],
+        other => vec![other.to_string()],
     }
 }
 
-fn supports_prompt(speech_models: &[&str]) -> bool {
-    speech_models.contains(&"universal-3-pro")
+fn keyterms_limit(primary_model: &str) -> usize {
+    if primary_model == "universal-2" {
+        KEYTERMS_LIMIT_U2
+    } else {
+        KEYTERMS_LIMIT_U35
+    }
 }
 
-fn supports_keyterms(primary_model: &str) -> bool {
-    matches!(
-        primary_model,
-        "universal-3-pro"
-            | "u3-rt-pro"
-            | "universal-streaming"
-            | "universal-streaming-english"
-            | "universal-streaming-multilingual"
-    )
-}
-
-fn normalize_keyterms(raw: &[String]) -> Vec<String> {
+fn normalize_keyterms(raw: &[String], limit: usize) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     for term in raw {
@@ -248,18 +242,11 @@ fn normalize_keyterms(raw: &[String]) -> Vec<String> {
             continue;
         }
         out.push(trimmed.to_string());
-        if out.len() == KEYTERMS_LIMIT {
+        if out.len() == limit {
             break;
         }
     }
     out
-}
-
-fn append_keyterms(keyterms: &[String], prompt: &str) -> String {
-    if keyterms.is_empty() {
-        return prompt.to_string();
-    }
-    format!("{prompt}\n\nKey terms: {}", keyterms.join(", "))
 }
 
 // Empeche les warnings dead_code si certaines branches ne sont jamais
@@ -273,9 +260,15 @@ mod tests {
 
     #[test]
     fn keyterms_dedup_and_limit() {
-        let raw: Vec<String> = (0..150).map(|i| format!("term {i}")).collect();
-        let normalized = normalize_keyterms(&raw);
-        assert_eq!(normalized.len(), KEYTERMS_LIMIT);
+        let raw: Vec<String> = (0..1_200).map(|i| format!("term {i}")).collect();
+        assert_eq!(
+            normalize_keyterms(&raw, keyterms_limit("universal-3-5-pro")).len(),
+            KEYTERMS_LIMIT_U35
+        );
+        assert_eq!(
+            normalize_keyterms(&raw, keyterms_limit("universal-2")).len(),
+            KEYTERMS_LIMIT_U2
+        );
     }
 
     #[test]
@@ -287,7 +280,7 @@ mod tests {
             "x".repeat(51),
             "  trim me  ".to_string(),
         ];
-        let n = normalize_keyterms(&raw);
+        let n = normalize_keyterms(&raw, KEYTERMS_LIMIT_U35);
         assert!(n.contains(&"ok term".to_string()));
         assert!(n.contains(&"trim me".to_string()));
         assert!(!n
@@ -299,22 +292,18 @@ mod tests {
     #[test]
     fn keyterms_dedup_case_insensitive() {
         let raw = vec!["Docker".into(), "docker".into(), "DOCKER".into()];
-        assert_eq!(normalize_keyterms(&raw), vec!["Docker".to_string()]);
-    }
-
-    #[test]
-    fn speech_models_universal3_includes_fallback() {
         assert_eq!(
-            speech_models_for("universal-3-pro"),
-            vec!["universal-3-pro", "universal-2"]
+            normalize_keyterms(&raw, KEYTERMS_LIMIT_U35),
+            vec!["Docker".to_string()]
         );
     }
 
     #[test]
-    fn speech_models_streaming_uses_universal2() {
-        assert_eq!(
-            speech_models_for("universal-streaming"),
-            vec!["universal-2"]
-        );
+    fn speech_models_universal35_and_legacy_ids() {
+        assert_eq!(speech_models_for("universal-3-5-pro"), vec!["universal-3-5-pro"]);
+        // Anciens identifiants Parla < 0.6.1 encore en store.
+        assert_eq!(speech_models_for("universal-3-pro"), vec!["universal-3-5-pro"]);
+        assert_eq!(speech_models_for("universal-streaming"), vec!["universal-2"]);
+        assert_eq!(speech_models_for("universal-2"), vec!["universal-2"]);
     }
 }

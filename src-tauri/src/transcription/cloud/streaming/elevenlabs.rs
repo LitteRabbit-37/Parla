@@ -2,7 +2,13 @@
 //
 // Reference VoiceInk : LLMkit ElevenLabsStreamingClient.swift.
 // WSS : wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=scribe_v2_realtime
-//       &audio_format=pcm_16000&commit_strategy=vad[&language_code=...]
+//       &audio_format=pcm_16000&commit_strategy=vad&no_verbatim=true
+//       [&language_code=...][&keyterms=...]*
+//       no_verbatim : VoiceInk "Enable no-verbatim for 11labs Scribe V2"
+//       (#808), le flux retire les hesitations comme le batch.
+//       keyterms   : vocabulaire personnalise, un parametre par terme
+//       (LLMkit ElevenLabsStreamingClient.normalizedKeyterms : trim,
+//       <= 20 caracteres, sans < > { } [ ] \, dedup, 50 max).
 // Header : xi-api-key
 // Handshake : attendre {"message_type":"session_started"}.
 // Audio : JSON { message_type: input_audio_chunk, audio_base_64: <b64>,
@@ -40,12 +46,15 @@ impl StreamingProvider for ElevenLabsStreaming {
         // On respecte ca meme si un autre model_id est passe.
         let _ = config.model;
         let mut url = String::from(
-            "wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=scribe_v2_realtime&audio_format=pcm_16000&commit_strategy=vad",
+            "wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=scribe_v2_realtime&audio_format=pcm_16000&commit_strategy=vad&no_verbatim=true",
         );
         if let Some(lang) = config.language.as_deref() {
             if !lang.is_empty() && lang != "auto" {
                 url.push_str(&format!("&language_code={}", urlencoding::encode(lang)));
             }
+        }
+        for term in normalize_keyterms(&config.custom_vocabulary) {
+            url.push_str(&format!("&keyterms={}", urlencoding::encode(&term)));
         }
 
         let mut req = url.into_client_request()?;
@@ -155,6 +164,31 @@ where
     committed.trim().to_string()
 }
 
+/// LLMkit ElevenLabsStreamingClient.normalizedKeyterms : trim, 20 caracteres
+/// max, sans < > { } [ ] \, dedup insensible a la casse, 50 termes max.
+fn normalize_keyterms(raw: &[String]) -> Vec<String> {
+    const UNSUPPORTED: [char; 7] = ['<', '>', '{', '}', '[', ']', '\\'];
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for term in raw {
+        let trimmed = term.trim();
+        if trimmed.is_empty()
+            || trimmed.chars().count() > 20
+            || trimmed.chars().any(|c| UNSUPPORTED.contains(&c))
+        {
+            continue;
+        }
+        if !seen.insert(trimmed.to_lowercase()) {
+            continue;
+        }
+        out.push(trimmed.to_string());
+        if out.len() == 50 {
+            break;
+        }
+    }
+    out
+}
+
 fn handle_text(t: &str, committed: &mut String, on_event: &(dyn Fn(StreamingEvent) + Send + Sync)) {
     let Ok(json) = serde_json::from_str::<Value>(t) else {
         return;
@@ -195,5 +229,28 @@ fn handle_text(t: &str, committed: &mut String, on_event: &(dyn Fn(StreamingEven
             on_event(StreamingEvent::Error { message: msg });
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod keyterm_tests {
+    use super::normalize_keyterms;
+
+    #[test]
+    fn keyterms_follow_llmkit_rules() {
+        let raw: Vec<String> = vec![
+            " Docker ".into(),
+            "docker".into(),
+            "a<b".into(),
+            "x".repeat(21),
+            "".into(),
+            "Kubernetes".into(),
+        ];
+        assert_eq!(
+            normalize_keyterms(&raw),
+            vec!["Docker".to_string(), "Kubernetes".to_string()]
+        );
+        let many: Vec<String> = (0..80).map(|i| format!("t{i}")).collect();
+        assert_eq!(normalize_keyterms(&many).len(), 50);
     }
 }
