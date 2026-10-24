@@ -744,5 +744,133 @@
   "cloudTimeout": {
     "title": "Delai de transcription cloud",
     "description": "Temps maximum d'attente d'une reponse du provider cloud. 30 secondes par defaut."
+  },
+  "modelCatalog": {
+    "whisper": {
+      "tiny": {
+        "name": "Tiny (multilingue)",
+        "notes": "Très rapide, précision limitée. Idéal pour les tests."
+      },
+      "tinyEn": {
+        "name": "Tiny (anglais)",
+        "notes": "Anglais uniquement. Un peu plus précis que Tiny multilingue en anglais."
+      },
+      "base": {
+        "name": "Base (multilingue)",
+        "notes": "Bon compromis entre taille et précision sur CPU."
+      },
+      "baseEn": {
+        "name": "Base (anglais)",
+        "notes": "Anglais uniquement. Plus précis que Base multilingue en anglais."
+      },
+      "largeV2": {
+        "name": "Large v2 (multilingue)",
+        "notes": "Très bonne précision. Nécessite beaucoup de mémoire vive."
+      },
+      "largeV3": {
+        "name": "Large v3 (multilingue)",
+        "notes": "Dernière génération. Précision maximale, mais exigeant pour le CPU."
+      },
+      "largeV3Turbo": {
+        "name": "Large v3 Turbo",
+        "notes": "Large v3 optimisé pour la vitesse. Recommandé avec CUDA."
+      },
+      "largeV3TurboQ5": {
+        "name": "Large v3 Turbo (Q5_0)",
+        "notes": "Quantifié. Très bon rapport qualité/taille sur CPU."
+      }
+    },
+    "parakeet": {
+      "v2": {
+        "name": "Parakeet TDT 0.6B v2 (anglais, F16)",
+        "notes": "Modèle de référence. Anglais uniquement. Environ 2,5 Go à télécharger."
+      },
+      "v2Int8": {
+        "name": "Parakeet TDT 0.6B v2 (anglais, int8)",
+        "notes": "Variante quantifiée int8. Environ 680 Mo. Anglais uniquement."
+      },
+      "v3": {
+        "name": "Parakeet TDT 0.6B v3 (multilingue, F16)",
+        "notes": "Multilingue (anglais et 25 langues européennes). Environ 2,5 Go."
+      },
+      "v3Int8": {
+        "name": "Parakeet TDT 0.6B v3 (multilingue, int8)",
+        "notes": "Multilingue, quantifié en int8. Environ 680 Mo."
+      }
+    },
+    "cloud": {
+      "groqWhisperTurbo": {
+        "notes": "Whisper v3 Turbo sur l’infrastructure Groq. Très rapide."
+      },
+      "scribeV1": {
+        "notes": "Transcription généraliste par lots."
+      },
+      "scribeMedical": {
+        "notes": "Optimisé pour l’audio clinique et la terminologie médicale. Transcrit à l’arrêt de l’enregistrement, sans temps réel."
+      },
+      "scribeRealtime": {
+        "notes": "Diffusion en temps réel via WebSocket."
+      },
+      "nova3": {
+        "notes": "Modèle phare pour les lots et le temps réel, avec mots-clés personnalisés."
+      },
+      "nova3Medical": {
+        "notes": "Adapté à l’usage médical (anglais uniquement)."
+      },
+      "voxtralMini": {
+        "notes": "Transcription par lots avec détection automatique de la langue."
+      },
+      "voxtralRealtime": {
+        "notes": "Diffusion en temps réel via WebSocket."
+      },
+      "sonioxAsync": {
+        "notes": "Transcription asynchrone. Prend en charge 60 langues."
+      },
+      "sonioxRealtime": {
+        "notes": "Diffusion en temps réel avec des jetons détaillés."
+      },
+      "speechmatics": {
+        "notes": "Transcription par lots (tâches asynchrones) et en temps réel (eu2)."
+      },
+      "geminiPro": {
+        "notes": "Audio intégré en base64, guidé par un prompt."
+      },
+      "geminiFlash": {
+        "notes": "Plus rapide et moins cher."
+      },
+      "grokVoice": {
+        "notes": "Reconnaissance vocale xAI, par lots et en temps réel via WebSocket."
+      },
+      "ink2": {
+        "notes": "Temps réel uniquement, le modèle le plus rapide de Cartesia. Anglais uniquement, sans détection automatique de la langue."
+      },
+      "universal36": {
+        "notes": "Modèle phare en temps réel, 32 langues. Hors temps réel (nouvelle tentative) : Universal-3.5 Pro ou Universal-2 selon la langue."
+      },
+      "universal35": {
+        "notes": "Le modèle le plus précis d’AssemblyAI, avec prise en charge du temps réel. Traitement par lots via envoi et interrogation du statut."
+      },
+      "universal2": {
+        "notes": "Transcription par lots Universal-2, plus de 90 langues. Plus rapide que Universal-3.5 Pro, sans temps réel (VoiceInk 2.13)."
+      }
+    },
+    "llm": {
+      "qwen25": {
+        "notes": "Polyvalent, avec un excellent rapport qualité/taille."
+      },
+      "llama32": {
+        "notes": "Grande fenêtre de contexte."
+      },
+      "gemma2": {
+        "notes": "Modèle léger, rapide sur CPU."
+      },
+      "phi35": {
+        "notes": "3,8 milliards de paramètres, performant en raisonnement et en suivi des instructions."
+      }
+    },
+    "imported": {
+      "whisper": "Modèle Whisper GGML importé par l’utilisateur.",
+      "llm": "Modèle GGUF importé par l’utilisateur."
+    }
   }
 }

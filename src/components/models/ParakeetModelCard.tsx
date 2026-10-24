@@ -7,15 +7,9 @@ import { Cpu, Download, Languages, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RatingDots } from "@/components/RatingDots";
 import { cn } from "@/lib/utils";
+import { localModelText, formatModelBytes } from "@/lib/modelLabels";
 import type { ParakeetModelState } from "@/lib/tauri";
 import type { ParakeetDownloadProgress } from "./types";
-
-function formatBytes(b: number): string {
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-  if (b < 1024 * 1024 * 1024) return `${(b / 1024 / 1024).toFixed(1)} MB`;
-  return `${(b / 1024 / 1024 / 1024).toFixed(2)} GB`;
-}
 
 type Props = {
   model: ParakeetModelState;
@@ -38,7 +32,10 @@ export function ParakeetModelCard({
   onDelete,
   onSetDefault,
 }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const text = localModelText(t, "parakeet", m);
+  const formatBytes = (bytes: number | null | undefined) =>
+    formatModelBytes(bytes, i18n.resolvedLanguage ?? "en");
   const pct =
     prog && prog.total > 0
       ? Math.round((prog.downloaded / prog.total) * 100)
@@ -52,8 +49,8 @@ export function ParakeetModelCard({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <p className="truncate font-medium">{m.display_name}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">{m.notes}</p>
+          <p className="truncate font-medium">{text.name}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{text.notes}</p>
           <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
             <span className="inline-flex items-center gap-1">
               <Cpu className="h-3 w-3" />

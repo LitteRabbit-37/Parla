@@ -744,5 +744,133 @@
   "cloudTimeout": {
     "title": "Cloud transcription timeout",
     "description": "Maximum time to wait for a cloud provider to return a transcription. Default 30 seconds."
+  },
+  "modelCatalog": {
+    "whisper": {
+      "tiny": {
+        "name": "Tiny (multilingual)",
+        "notes": "Very fast, limited accuracy. Good for testing."
+      },
+      "tinyEn": {
+        "name": "Tiny (English)",
+        "notes": "English only. Slightly more accurate than multilingual Tiny for English."
+      },
+      "base": {
+        "name": "Base (multilingual)",
+        "notes": "Good balance of size and accuracy for CPU use."
+      },
+      "baseEn": {
+        "name": "Base (English)",
+        "notes": "English only. More accurate than multilingual Base for English."
+      },
+      "largeV2": {
+        "name": "Large v2 (multilingual)",
+        "notes": "Very high accuracy. Requires a lot of RAM."
+      },
+      "largeV3": {
+        "name": "Large v3 (multilingual)",
+        "notes": "Latest generation. Maximum accuracy with high CPU requirements."
+      },
+      "largeV3Turbo": {
+        "name": "Large v3 Turbo",
+        "notes": "Large v3 optimized for speed. Recommended with CUDA."
+      },
+      "largeV3TurboQ5": {
+        "name": "Large v3 Turbo (Q5_0)",
+        "notes": "Quantized. Very good balance of quality and size for CPU use."
+      }
+    },
+    "parakeet": {
+      "v2": {
+        "name": "Parakeet TDT 0.6B v2 (English, F16)",
+        "notes": "Reference model. English only. Approx. 2.5 GB download."
+      },
+      "v2Int8": {
+        "name": "Parakeet TDT 0.6B v2 (English, int8)",
+        "notes": "int8 quantized variant. Approx. 680 MB. English only."
+      },
+      "v3": {
+        "name": "Parakeet TDT 0.6B v3 (multilingual, F16)",
+        "notes": "Multilingual (English and 25 European languages). Approx. 2.5 GB."
+      },
+      "v3Int8": {
+        "name": "Parakeet TDT 0.6B v3 (multilingual, int8)",
+        "notes": "Multilingual, int8 quantized. Approx. 680 MB."
+      }
+    },
+    "cloud": {
+      "groqWhisperTurbo": {
+        "notes": "Whisper v3 Turbo on Groq infrastructure. Very fast."
+      },
+      "scribeV1": {
+        "notes": "General-purpose batch transcription."
+      },
+      "scribeMedical": {
+        "notes": "Optimized for clinical audio and medical terminology. Transcribes when recording stops, without realtime streaming."
+      },
+      "scribeRealtime": {
+        "notes": "Realtime streaming via WebSocket."
+      },
+      "nova3": {
+        "notes": "Flagship model for batch and streaming, with custom keywords."
+      },
+      "nova3Medical": {
+        "notes": "Tuned for medical use (English only)."
+      },
+      "voxtralMini": {
+        "notes": "Batch transcription with automatic language detection."
+      },
+      "voxtralRealtime": {
+        "notes": "Realtime streaming via WebSocket."
+      },
+      "sonioxAsync": {
+        "notes": "Asynchronous transcription. Supports 60 languages."
+      },
+      "sonioxRealtime": {
+        "notes": "Realtime streaming with fine-grained tokens."
+      },
+      "speechmatics": {
+        "notes": "Batch transcription (asynchronous jobs) and realtime (eu2)."
+      },
+      "geminiPro": {
+        "notes": "Inline base64 audio, guided by a prompt."
+      },
+      "geminiFlash": {
+        "notes": "Faster and less expensive."
+      },
+      "grokVoice": {
+        "notes": "xAI speech-to-text, with batch transcription and realtime WebSocket streaming."
+      },
+      "ink2": {
+        "notes": "Streaming only, Cartesia’s fastest model. English only, without automatic language detection."
+      },
+      "universal36": {
+        "notes": "Flagship realtime model, 32 languages. Outside realtime (retry): Universal-3.5 Pro or Universal-2, depending on the language."
+      },
+      "universal35": {
+        "notes": "AssemblyAI’s most accurate model, with realtime support. Batch processing via upload and polling."
+      },
+      "universal2": {
+        "notes": "Universal-2 batch transcription, over 90 languages. Faster than Universal-3.5 Pro, without realtime (VoiceInk 2.13)."
+      }
+    },
+    "llm": {
+      "qwen25": {
+        "notes": "Versatile, with an excellent balance of quality and size."
+      },
+      "llama32": {
+        "notes": "Long context window."
+      },
+      "gemma2": {
+        "notes": "Lightweight model, fast on CPU."
+      },
+      "phi35": {
+        "notes": "3.8B parameters, strong reasoning and instruction following."
+      }
+    },
+    "imported": {
+      "whisper": "Whisper GGML model imported by the user.",
+      "llm": "GGUF model imported by the user."
+    }
   }
 }

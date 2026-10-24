@@ -347,69 +347,94 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
-/// Native menu labels. Mirrors the `tray.*` keys of the frontend locales
-/// (en / fr / es) ; the native menu cannot use react-i18next.
+/// Native menu labels for the supported UI languages (en / fr / es / de).
+/// The native menu cannot use react-i18next.
 fn tr(lang: &str, key: &str) -> String {
     let col = match lang {
         "fr" => 1,
         "es" => 2,
+        "de" => 3,
         _ => 0,
     };
-    let row: [&str; 3] = match key {
-        "open" => ["Open Parla", "Ouvrir Parla", "Abrir Parla"],
+    let row: [&str; 4] = match key {
+        "open" => ["Open Parla", "Ouvrir Parla", "Abrir Parla", "Parla öffnen"],
         "completeOnboarding" => [
             "Complete onboarding",
             "Terminer la configuration",
             "Completar la configuraci\u{f3}n",
+            "Einrichtung abschließen",
         ],
         "toggleRecorder" => [
             "Toggle recording",
             "D\u{e9}marrer / arr\u{ea}ter l'enregistrement",
             "Iniciar / detener la grabaci\u{f3}n",
+            "Aufnahme starten / stoppen",
         ],
-        "mode" => ["Power Mode", "Power Mode", "Power Mode"],
-        "none" => ["None", "Aucun", "Ninguno"],
+        "mode" => ["Power Mode", "Power Mode", "Power Mode", "Power Mode"],
+        "none" => ["None", "Aucun", "Ninguno", "Kein Profil"],
         "noModes" => [
             "No profiles available",
             "Aucun profil disponible",
             "Sin perfiles disponibles",
+            "Keine Profile verfügbar",
         ],
         "manageModes" => [
             "Manage Power Mode",
             "G\u{e9}rer Power Mode",
             "Gestionar Power Mode",
+            "Power Mode verwalten",
         ],
         "manageModels" => [
             "Manage AI models",
             "G\u{e9}rer les mod\u{e8}les IA",
             "Gestionar modelos de IA",
+            "KI-Modelle verwalten",
         ],
-        "audioInput" => ["Audio input", "Entr\u{e9}e audio", "Entrada de audio"],
+        "audioInput" => [
+            "Audio input",
+            "Entr\u{e9}e audio",
+            "Entrada de audio",
+            "Audioeingang",
+        ],
         "systemDefault" => [
             "System default",
             "D\u{e9}faut syst\u{e8}me",
             "Predeterminado del sistema",
+            "Systemstandard",
         ],
         "retryLast" => [
             "Retry last transcription",
             "R\u{e9}essayer la derni\u{e8}re transcription",
             "Reintentar la \u{fa}ltima transcripci\u{f3}n",
+            "Letzte Aufnahme erneut transkribieren",
         ],
         "copyLast" => [
             "Copy last transcription",
             "Copier la derni\u{e8}re transcription",
             "Copiar la \u{fa}ltima transcripci\u{f3}n",
+            "Letzte Transkription kopieren",
         ],
-        "history" => ["History", "Historique", "Historial"],
-        "launchAtLogin" => ["Launch at login", "Lancer au d\u{e9}marrage", "Iniciar al arrancar"],
-        "settings" => ["Settings", "Param\u{e8}tres", "Ajustes"],
+        "history" => ["History", "Historique", "Historial", "Verlauf"],
+        "launchAtLogin" => [
+            "Launch at login",
+            "Lancer au d\u{e9}marrage",
+            "Iniciar al arrancar",
+            "Bei Anmeldung starten",
+        ],
+        "settings" => ["Settings", "Param\u{e8}tres", "Ajustes", "Einstellungen"],
         "checkUpdates" => [
             "Check for updates",
             "V\u{e9}rifier les mises \u{e0} jour",
             "Buscar actualizaciones",
+            "Nach Updates suchen",
         ],
-        "quit" => ["Quit Parla", "Quitter Parla", "Salir de Parla"],
-        _ => [key, key, key],
+        "quit" => [
+            "Quit Parla",
+            "Quitter Parla",
+            "Salir de Parla",
+            "Parla beenden",
+        ],
+        _ => [key, key, key, key],
     };
     row[col].to_string()
 }

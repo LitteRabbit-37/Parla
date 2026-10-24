@@ -360,8 +360,8 @@ export function ModelsPage({
   );
 
   const defaultDisplayName = useMemo(
-    () => resolveDefaultDisplayName(source, whisper, parakeet, cloudModels),
-    [source, whisper, parakeet, cloudModels],
+    () => resolveDefaultDisplayName(t, source, whisper, parakeet, cloudModels),
+    [t, source, whisper, parakeet, cloudModels],
   );
 
   const showCpuHint = ep === "cpu" && rows.some((r) => r.type === "parakeet");

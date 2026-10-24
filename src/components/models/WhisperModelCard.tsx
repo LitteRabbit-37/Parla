@@ -7,14 +7,8 @@ import { Check, Download, Loader2, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RatingDots } from "@/components/RatingDots";
 import { cn } from "@/lib/utils";
+import { localModelText, formatModelBytes } from "@/lib/modelLabels";
 import type { DownloadProgress, WhisperModelState } from "@/lib/tauri";
-
-function formatBytes(bytes: number | null | undefined): string {
-  if (bytes == null) return "-";
-  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} Go`;
-  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(0)} Mo`;
-  return `${Math.round(bytes / 1024)} Ko`;
-}
 
 type Props = {
   model: WhisperModelState;
@@ -37,7 +31,10 @@ export function WhisperModelCard({
   onDelete,
   onSetDefault,
 }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const text = localModelText(t, "whisper", m);
+  const formatBytes = (bytes: number | null | undefined) =>
+    formatModelBytes(bytes, i18n.resolvedLanguage ?? "en");
   const pct = p ? Math.round((p.downloaded / Math.max(1, p.total)) * 100) : null;
   return (
     <div
@@ -49,7 +46,7 @@ export function WhisperModelCard({
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <p className="font-medium">{m.display_name}</p>
+            <p className="font-medium">{text.name}</p>
             {!m.multilingual && !m.imported && (
               <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                 {t("whisperModels.englishOnly")}
@@ -66,7 +63,7 @@ export function WhisperModelCard({
               </span>
             )}
           </div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{m.notes}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{text.notes}</p>
           <p className="mt-1 text-xs text-muted-foreground">
             {t("whisperModels.approxSize", { size: formatBytes(m.size_bytes) })}
             {m.downloaded &&
