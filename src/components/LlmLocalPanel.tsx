@@ -19,6 +19,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { localModelText, formatModelBytes } from "@/lib/modelLabels";
 import {
   api,
   type GgufModelState,
@@ -28,15 +29,10 @@ import {
 
 type DownloadProgress = { id: string; downloaded: number; total: number };
 
-function formatBytes(b: number): string {
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-  if (b < 1024 * 1024 * 1024) return `${(b / 1024 / 1024).toFixed(1)} MB`;
-  return `${(b / 1024 / 1024 / 1024).toFixed(2)} GB`;
-}
-
 export function LlmLocalPanel() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const formatBytes = (bytes: number) =>
+    formatModelBytes(bytes, i18n.resolvedLanguage ?? "en");
   const [models, setModels] = useState<GgufModelState[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [cudaEnabled, setCudaEnabled] = useState(false);
@@ -266,6 +262,7 @@ export function LlmLocalPanel() {
 
         <ul className="grid gap-2">
           {models.map((m) => {
+            const text = localModelText(t, "llm", m);
             const prog = progress[m.id];
             const st = status[m.id];
             const isSelected = m.id === selectedId;
@@ -284,7 +281,7 @@ export function LlmLocalPanel() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">
-                      {m.display_name}
+                      {text.name}
                       {m.imported && (
                         <span className="ml-2 text-[10px] text-muted-foreground">
                           {t("llmLocal.imported")}
@@ -297,13 +294,13 @@ export function LlmLocalPanel() {
                       )}
                     </p>
                     <p className="truncate text-xs text-muted-foreground">
-                      {m.notes}
+                      {text.notes}
                     </p>
                     <p className="text-[11px] text-muted-foreground">
                       {formatBytes(m.size_bytes)}
                       {m.context_length > 0 &&
                         ` - ${t("llmLocal.ctx", {
-                          count: m.context_length.toLocaleString(),
+                          count: m.context_length.toLocaleString(i18n.resolvedLanguage),
                         })}`}
                     </p>
                   </div>

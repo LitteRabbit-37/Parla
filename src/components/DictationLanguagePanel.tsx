@@ -5,7 +5,7 @@
 // LanguageDictionary.swift. La cle store cote Parla est `whisper_language`
 // (legacy : la cle existait avant les sources cloud / parakeet).
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { Globe } from "lucide-react";
@@ -20,7 +20,14 @@ import { languageLabel } from "@/lib/languages";
 import { api, type TranscriptionSource } from "@/lib/tauri";
 
 export function DictationLanguagePanel() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const locale = i18n.resolvedLanguage ?? "en";
+  const names = useMemo(
+    () => typeof Intl.DisplayNames === "function"
+      ? new Intl.DisplayNames([locale], { type: "language", fallback: "none" })
+      : undefined,
+    [locale],
+  );
   const [supportedCodes, setSupportedCodes] = useState<string[]>([]);
   const [selected, setSelected] = useState<string>("auto");
   const [activeLabel, setActiveLabel] = useState<string>("");
@@ -76,7 +83,7 @@ export function DictationLanguagePanel() {
   const sorted = [...supportedCodes].sort((a, b) => {
     if (a === "auto") return -1;
     if (b === "auto") return 1;
-    return languageLabel(a).localeCompare(languageLabel(b));
+    return languageLabel(a, names).localeCompare(languageLabel(b, names), locale);
   });
 
   return (
@@ -102,7 +109,7 @@ export function DictationLanguagePanel() {
             <option key={code} value={code}>
               {code === "auto"
                 ? t("dictationLanguage.auto")
-                : languageLabel(code)}
+                : languageLabel(code, names)}
               {" "}
               ({code})
             </option>

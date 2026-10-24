@@ -27,7 +27,11 @@ Parla ships with French, English and Spanish translations under `src/i18n/locale
 
 - Copy `en.json` to `<lang>.json`
 - Translate the values (keys stay untouched)
-- Register the new language in `src/i18n/index.ts` (`SUPPORTED_LANGUAGES` and `LANGUAGE_LABELS`)
+- Import and register the new language in `src/i18n/index.ts` (`resources`, `SUPPORTED_LANGUAGES` and `LANGUAGE_LABELS`)
+- Add native tray translations in `src-tauri/src/tray.rs`
+- Run `npm run test:i18n` and `npx tsc --noEmit`
+
+Built-in model names and descriptions are translated through `modelCatalog` in each locale. When adding a model to a Rust catalog, also add its stable ID mapping in `src/lib/modelLabels.ts` and the corresponding keys in every locale. Cloud mappings include the provider ID. Keep product names and user-chosen names intact. The localization tests check catalog coverage against the Rust sources and render model cards in every supported language.
 
 Translation PRs are especially welcome and easy to review.
 

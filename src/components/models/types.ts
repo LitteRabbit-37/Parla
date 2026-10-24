@@ -4,6 +4,9 @@
 // base : le filtre (Recommended / Local / Cloud) est purement visuel et
 // l'activation passe toujours par "Definir par defaut" sur une card.
 
+import type { TFunction } from "i18next";
+import { localModelText, cloudModelText } from "@/lib/modelLabels";
+
 import type {
   ParakeetModelState,
   TranscriptionSource,
@@ -92,6 +95,7 @@ export function isRowCurrent(
 /// DisplayName du modele actif pour le header "Default Model"
 /// (equivalent VoiceInk currentTranscriptionModel?.displayName).
 export function resolveDefaultDisplayName(
+  t: TFunction,
   source: TranscriptionSource | null,
   whisper: WhisperModelState[],
   parakeet: ParakeetModelState[],
@@ -99,24 +103,20 @@ export function resolveDefaultDisplayName(
 ): string | null {
   if (!source) return null;
   switch (source.kind) {
-    case "local":
-      return (
-        whisper.find((m) => m.id === source.whisper_model_id)?.display_name ??
-        null
+    case "local": {
+      const model = whisper.find((m) => m.id === source.whisper_model_id);
+      return model ? localModelText(t, "whisper", model).name : null;
+    }
+    case "parakeet": {
+      const model = parakeet.find((m) => m.id === source.parakeet_model_id);
+      return model ? localModelText(t, "parakeet", model).name : null;
+    }
+    case "cloud": {
+      const model = cloudModels.find(
+        (m) => m.provider_id === source.cloud_provider && m.model_id === source.cloud_model,
       );
-    case "parakeet":
-      return (
-        parakeet.find((m) => m.id === source.parakeet_model_id)
-          ?.display_name ?? null
-      );
-    case "cloud":
-      return (
-        cloudModels.find(
-          (m) =>
-            m.provider_id === source.cloud_provider &&
-            m.model_id === source.cloud_model,
-        )?.display_name ?? null
-      );
+      return model ? cloudModelText(t, model).name : null;
+    }
     default:
       return null;
   }

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test:i18n": "node --test tests/model-localization.test.cjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },

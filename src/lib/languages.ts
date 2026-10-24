@@ -120,8 +120,17 @@ export const LANGUAGE_NAMES: Record<string, string> = {
   zu: "Zulu",
 };
 
-/// Resolve un code ISO en libelle affichable. Renvoie le code en upper-case
-/// si inconnu (defensive : permet d'afficher un code exotique sans casser l'UI).
-export function languageLabel(code: string): string {
+// Localize language names using the UI locale. Keep the catalog label as a
+// fallback for codes not known to the runtime's Intl data. Provider IDs such
+// as en_uk stay unchanged; only their display lookup uses BCP 47 syntax.
+export function languageLabel(code: string, names?: Intl.DisplayNames): string {
+  if (names) {
+    try {
+      const label = names.of(code.replace(/_/g, "-"));
+      if (label) return label;
+    } catch {
+      // Unknown or non-standard provider language code.
+    }
+  }
   return LANGUAGE_NAMES[code] ?? code.toUpperCase();
 }
